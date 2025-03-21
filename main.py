@@ -954,6 +954,10 @@ class KompasApp:
     def insert_template(self, template_text):
         """Вставка выбранного шаблона в текстовое поле"""
         if template_text:
+            # Удаляем название категории в квадратных скобках, если оно есть
+            if template_text.startswith('['):
+                template_text = template_text[template_text.find(']') + 1:].strip()
+                
             cursor_pos = self.current_reqs_text.index(tk.INSERT)
             self.current_reqs_text.insert(cursor_pos, template_text + "\n")
             self.set_status(f"Вставлен шаблон: {template_text[:30]}...")
@@ -1092,7 +1096,6 @@ class KompasApp:
             # Получаем текст из редактора
             text_content = self.current_reqs_text.get(1.0, tk.END).strip()
             
-            # Проверяем, является ли документ чертежом
             try:
                 # Получаем интерфейс чертежа
                 drawing_document = self.module7.IDrawingDocument(active_doc)
@@ -1142,115 +1145,109 @@ class KompasApp:
                 
                 # Разбиваем текст на строки
                 lines = text_content.split("\n")
+                
+                # Удаляем пустые строки
                 lines = [line.strip() for line in lines if line.strip()]
                 
-                # Подготовка строк для вставки в KOMPAS-3D
-                processed_lines = []
+                # Удаляем существующую нумерацию и определяем, какие строки должны быть пронумерованы
+                cleaned_lines = []
+                should_number = []
                 
-                # Если включена автонумерация, применяем её
-                if self.auto_numbering_var.get():
-                    # Удаляем существующую нумерацию и определяем, какие строки должны быть пронумерованы
-                    cleaned_lines = []
-                    should_number = []
+                for i, line in enumerate(lines):
+                    # Удаляем существующую нумерацию (если есть)
+                    clean_line = re.sub(r'^\d+\.\s*', '', line)
+                    # Удаляем отступы в начале строки
+                    clean_line = clean_line.lstrip()
+                    cleaned_lines.append(clean_line)
                     
-                    for i, line in enumerate(lines):
-                        # Удаляем существующую нумерацию (если есть)
-                        clean_line = re.sub(r'^\d+\.\s*', '', line)
-                        # Удаляем отступы в начале строки
-                        clean_line = clean_line.lstrip()
-                        cleaned_lines.append(clean_line)
-                        
-                        # Определяем, должна ли строка иметь номер
-                        # Строка не должна иметь номер, если она начинается с маленькой буквы или с тире/дефиса
-                        # и не является первой строкой
-                        if i > 0 and (
-                            (len(clean_line) > 0 and clean_line[0].islower()) or 
-                            clean_line.startswith('-') or 
-                            clean_line.startswith('–')
-                        ):
-                            should_number.append(False)
-                        else:
-                            should_number.append(True)
-                    
-                    # Добавляем строки с информацией о нумерации
-                    for i, (line, should_num) in enumerate(zip(cleaned_lines, should_number)):
-                        processed_lines.append((line, should_num))
-                else:
-                    # Если автонумерация выключена, просто используем текст как есть
-                    for line in lines:
-                        # Проверяем, есть ли нумерация в начале строки
-                        num_match = re.match(r'^(\d+)\.\s*(.*)', line)
-                        if num_match:
-                            # Если есть нумерация, извлекаем текст и информацию о нумерации
-                            req_text = num_match.group(2).strip()
-                            processed_lines.append((req_text, True))
-                        else:
-                            # Проверяем, есть ли отступ в начале строки (для продолжения пункта)
-                            indent_match = re.match(r'^\s+(.+)', line)
-                            if indent_match:
-                                # Если есть отступ, это продолжение пункта
-                                req_text = indent_match.group(1).strip()
-                                processed_lines.append((req_text, False))
-                            else:
-                                # Если нет нумерации и отступа, используем строку как есть
-                                processed_lines.append((line, True))  # Предполагаем, что это новый пункт
+                    # Определяем, должна ли строка иметь номер
+                    # Строка не должна иметь номер, если она начинается с маленькой буквы или с тире/дефиса
+                    # и не является первой строкой
+                    if i > 0 and (
+                        (len(clean_line) > 0 and clean_line[0].islower()) or 
+                        clean_line.startswith('-') or 
+                        clean_line.startswith('–')
+                    ):
+                        should_number.append(False)
+                    else:
+                        should_number.append(True)
                 
-                # Добавляем каждую строку в технические требования KOMPAS-3D
-                for i, (line_text, is_numbered) in enumerate(processed_lines):
-                    try:
-                        # Добавляем строку
-                        text_line = text_obj.Add()
-                        text_line.Str = line_text
-                        
-                        # Устанавливаем нумерацию
-                        if is_numbered:
-                            text_line.Numbering = 1
-                        else:
-                            text_line.Numbering = 0
-                            
-                    except Exception as line_error:
-                        print(f"Ошибка при добавлении строки '{line_text}': {str(line_error)}")
-                        # Продолжаем с следующей строкой
-                
-                # Применяем изменения
-                if hasattr(tech_demand, 'Update'):
-                    tech_demand.Update()
-                
-                # Обновляем документ
-                if hasattr(drawing_document, 'Update'):
-                    drawing_document.Update()
-                else:
-                    # Если метода Update нет, пробуем обновить через active_doc
-                    if hasattr(active_doc, 'Update'):
-                        active_doc.Update()
-                
-                # Сохраняем документ, если нужно
-                if save_document:
-                    try:
-                        active_doc.Save()
-                        self.set_status("Документ сохранен")
-                    except Exception as e:
-                        error_msg = self.handle_kompas_error(e, "сохранения документа")
-                        self.set_status("Не удалось сохранить документ автоматически")
-                
-                doc_name = active_doc.Name
-                self.set_status(f"Технические требования применены к {doc_name}" + 
-                              (" и сохранены" if save_document else " (без сохранения файла)"))
-                
-                if save_document:
-                    messagebox.showinfo("Информация", f"Технические требования успешно сохранены в {doc_name}")
-                else:
-                    messagebox.showinfo("Информация", f"Технические требования успешно применены к {doc_name} (без сохранения файла)")
-                
+                # Добавляем строки с информацией о нумерации
+                for i, (line, should_num) in enumerate(zip(cleaned_lines, should_number)):
+                    processed_lines.append((line, should_num))
             except Exception as e:
-                error_message = self.handle_kompas_error(e, "применения технических требований")
-                self.set_status("Ошибка при применении тех. требований")
-                messagebox.showerror("Ошибка", error_message)
-                print(f"Exception details: {str(e)}")
+                self.handle_kompas_error(e, "обработки технических требований")
+                return
+            else:
+                # Если автонумерация выключена, просто используем текст как есть
+                for line in lines:
+                    # Проверяем, есть ли нумерация в начале строки
+                    num_match = re.match(r'^(\d+)\.\s*(.*)', line)
+                    if num_match:
+                        # Если есть нумерация, извлекаем текст и информацию о нумерации
+                        req_text = num_match.group(2).strip()
+                        processed_lines.append((req_text, True))
+                    else:
+                        # Проверяем, есть ли отступ в начале строки (для продолжения пункта)
+                        indent_match = re.match(r'^\s+(.+)', line)
+                        if indent_match:
+                            # Если есть отступ, это продолжение пункта
+                            req_text = indent_match.group(1).strip()
+                            processed_lines.append((req_text, False))
+                        else:
+                            # Если нет нумерации и отступа, используем строку как есть
+                            processed_lines.append((line, True))  # Предполагаем, что это новый пункт
+                
+            # Добавляем каждую строку в технические требования KOMPAS-3D
+            for i, (line_text, is_numbered) in enumerate(processed_lines):
+                try:
+                    # Добавляем строку
+                    text_line = text_obj.Add()
+                    text_line.Str = line_text
+                    
+                    # Устанавливаем нумерацию
+                    if is_numbered:
+                        text_line.Numbering = 1
+                    else:
+                        text_line.Numbering = 0
+                        
+                except Exception as line_error:
+                    print(f"Ошибка при добавлении строки '{line_text}': {str(line_error)}")
+                    # Продолжаем с следующей строкой
+                
+            # Применяем изменения
+            if hasattr(tech_demand, 'Update'):
+                tech_demand.Update()
+            
+            # Обновляем документ
+            if hasattr(drawing_document, 'Update'):
+                drawing_document.Update()
+            else:
+                # Если метода Update нет, пробуем обновить через active_doc
+                if hasattr(active_doc, 'Update'):
+                    active_doc.Update()
+            
+            # Сохраняем документ, если нужно
+            if save_document:
+                try:
+                    active_doc.Save()
+                    self.set_status("Документ сохранен")
+                except Exception as e:
+                    error_msg = self.handle_kompas_error(e, "сохранения документа")
+                    self.set_status("Не удалось сохранить документ автоматически")
+            
+            doc_name = active_doc.Name
+            self.set_status(f"Технические требования применены к {doc_name}" + 
+                          (" и сохранены" if save_document else " (без сохранения файла)"))
+            
+            if save_document:
+                messagebox.showinfo("Информация", f"Технические требования успешно сохранены в {doc_name}")
+            else:
+                messagebox.showinfo("Информация", f"Технические требования успешно применены к {doc_name} (без сохранения файла)")
                 
         except Exception as e:
-            error_message = self.handle_kompas_error(e, "работы с документом")
-            self.set_status("Ошибка при работе с документом")
+            error_message = self.handle_kompas_error(e, "применения технических требований")
+            self.set_status("Ошибка при применении тех. требований")
             messagebox.showerror("Ошибка", error_message)
             print(f"Exception details: {str(e)}")
             
@@ -1734,22 +1731,36 @@ class KompasApp:
             # Удаляем пустые строки
             lines = [line.strip() for line in lines if line.strip()]
             
-            # Удаляем существующую нумерацию
-            numbered_lines = []
-            for line in lines:
+            # Удаляем существующую нумерацию и определяем, какие строки должны быть пронумерованы
+            cleaned_lines = []
+            should_number = []
+            
+            for i, line in enumerate(lines):
                 # Удаляем существующую нумерацию (если есть)
                 clean_line = re.sub(r'^\d+\.\s*', '', line)
-                numbered_lines.append(clean_line)
+                cleaned_lines.append(clean_line)
+                
+                # Определяем, должна ли строка иметь номер
+                # Строка не должна иметь номер, если она начинается с маленькой буквы или с тире/дефиса
+                # и не является первой строкой
+                if i > 0 and (
+                    (len(clean_line) > 0 and clean_line[0].islower()) or 
+                    clean_line.startswith('-') or 
+                    clean_line.startswith('–')
+                ):
+                    should_number.append(False)
+                else:
+                    should_number.append(True)
             
             # Применяем новую нумерацию
             result_lines = []
-            for i, line in enumerate(numbered_lines):
-                # Если это продолжение предыдущего пункта (начинается с маленькой буквы или с тире/дефиса)
-                if i > 0 and (line[0].islower() or line.startswith('-') or line.startswith('–')):
-                    result_lines.append(line)
-                else:
-                    # Иначе это новый пункт с номером
+            for i, (line, should_num) in enumerate(zip(cleaned_lines, should_number)):
+                processed_lines.append((line, should_num))
+            for i, (line, should_num) in enumerate(zip(cleaned_lines, should_number)):
+                if should_num:
                     result_lines.append(f"{i+1}. {line}")
+                else:
+                    result_lines.append(line)
             
             # Обновляем текст в редакторе
             self.current_reqs_text.delete(1.0, tk.END)
