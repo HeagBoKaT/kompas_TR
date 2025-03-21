@@ -616,7 +616,7 @@ class KompasApp:
         self.root.bind("<Control-k>", lambda event: self.connect_to_kompas())
         self.root.bind("<Control-g>", lambda event: self.get_technical_requirements())
         self.root.bind("<Control-s>", lambda event: self.save_technical_requirements())
-        self.root.bind("<Control-a>", lambda event: self.apply_technical_requirements())
+        self.root.bind("<Control-e>", lambda event: self.apply_technical_requirements())
         self.root.bind("<F5>", lambda event: self.reload_templates())
         self.root.bind("<F6>", lambda event: self.update_documents_tree())
         self.root.bind("<Control-f>", lambda event: self.focus_search())
