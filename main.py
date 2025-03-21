@@ -323,8 +323,8 @@ class KompasApp:
         ttk.Label(search_doc_frame, text="🔍", font=('Segoe UI', 9)).pack(side=tk.LEFT, padx=(0, 5))
         self.doc_search_var = tk.StringVar()
         self.doc_search_var.trace_add("write", self.filter_documents_tree)
-        doc_search_entry = ttk.Entry(search_doc_frame, textvariable=self.doc_search_var)
-        doc_search_entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        self.doc_search_entry = ttk.Entry(search_doc_frame, textvariable=self.doc_search_var)
+        self.doc_search_entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
         
         # Кнопка обновления дерева документов
         refresh_btn = ttk.Button(search_doc_frame, text="🔄", width=3,
@@ -381,14 +381,16 @@ class KompasApp:
         templates_frame = ttk.LabelFrame(right_paned, text="Шаблоны технических требований")
         
         # Панель поиска для шаблонов
-        search_template_frame = ttk.Frame(templates_frame, style='Search.TFrame')
-        search_template_frame.pack(fill=tk.X, padx=5, pady=(5, 0))
+        search_template_frame = ttk.Frame(templates_frame)
+        search_template_frame.pack(fill=tk.X, padx=5, pady=5)
         
-        ttk.Label(search_template_frame, text="🔍", font=('Segoe UI', 9)).pack(side=tk.LEFT, padx=(0, 5))
+        search_label = ttk.Label(search_template_frame, text="Поиск шаблона:")
+        search_label.pack(side=tk.LEFT, padx=(0, 5))
+        
         self.template_search_var = tk.StringVar()
         self.template_search_var.trace_add("write", self.filter_templates)
-        template_search_entry = ttk.Entry(search_template_frame, textvariable=self.template_search_var)
-        template_search_entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        self.template_search_entry = ttk.Entry(search_template_frame, textvariable=self.template_search_var)
+        self.template_search_entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
         
         # Создание вкладок для категорий шаблонов
         self.template_tabs = ttk.Notebook(templates_frame)
@@ -625,9 +627,9 @@ class KompasApp:
         """Установка фокуса на поле поиска"""
         current_tab = self.template_tabs.index(self.template_tabs.select())
         if current_tab == 0:  # Если активна первая вкладка
-            self.template_search_var.focus_set()
+            self.template_search_entry.focus_set()
         else:
-            self.doc_search_var.focus_set()
+            self.doc_search_entry.focus_set()
             
     def filter_documents_tree(self, *args):
         """Фильтрация дерева документов по поисковому запросу"""
