@@ -15,8 +15,8 @@ class KompasApp:
         """Инициализация приложения"""
         self.root = root
         self.root.title("Редактор технических требований KOMPAS-3D")
-        self.root.geometry("1200x800")
-        self.root.minsize(800, 600)
+        self.root.geometry("1400x900")
+        self.root.minsize(1000, 700)
         
         # Установка иконки приложения
         icon_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "icons", "icon.ico")
@@ -79,7 +79,7 @@ class KompasApp:
         style.configure('TFrame', background='#f5f5f5')
         style.configure('TLabel', background='#f5f5f5')
         style.configure('TLabelframe', background='#f5f5f5')
-        style.configure('TLabelframe.Label', background='#f5f5f5', font=('Segoe UI', 9, 'bold'))
+        style.configure('TLabelframe.Label', background='#f5f5f5', font=('Segoe UI', 10, 'bold'))
         
         # Стиль для панели инструментов
         style.configure('Toolbar.TFrame', background='#e9e9e9')
@@ -88,7 +88,7 @@ class KompasApp:
         style.configure('Search.TFrame', background='#e9e9e9')
         
         # Стиль для кнопок
-        style.configure('TButton', padding=2)
+        style.configure('TButton', padding=3)
         
         # Стиль для статусной строки
         style.configure('Status.TLabel', background='#e9e9e9', relief='sunken', anchor='w', padding=(5, 2))
@@ -96,18 +96,18 @@ class KompasApp:
         style.configure('StatusRed.TLabel', background='#e9e9e9', foreground='red', relief='sunken')
         
         # Стиль для заголовков Treeview
-        style.configure('Treeview.Heading', font=('Segoe UI', 9, 'bold'))
+        style.configure('Treeview.Heading', font=('Segoe UI', 10, 'bold'))
         
         # Стиль для вкладок
-        style.configure('TNotebook.Tab', padding=[10, 2])
+        style.configure('TNotebook.Tab', padding=[12, 4])
         
         # Настройка конкретных элементов
-        style.configure('TButton', padding=5, font=('Segoe UI', 9))
-        style.configure('TLabel', font=('Segoe UI', 9))
+        style.configure('TButton', padding=5, font=('Segoe UI', 10))
+        style.configure('TLabel', font=('Segoe UI', 10))
         style.configure('TNotebook', background='#f0f0f0')
-        style.configure('TNotebook.Tab', padding=[10, 5], font=('Segoe UI', 9))
-        style.configure('Treeview', font=('Segoe UI', 9), rowheight=25)
-        style.configure('Treeview.Heading', font=('Segoe UI', 9, 'bold'))
+        style.configure('TNotebook.Tab', padding=[12, 6], font=('Segoe UI', 10))
+        style.configure('Treeview', font=('Segoe UI', 10), rowheight=28)
+        style.configure('Treeview.Heading', font=('Segoe UI', 10, 'bold'))
         
         # Настройка для строки статуса
         style.configure('StatusBar.TLabel', padding=3, background='#e0e0e0', relief='sunken')
@@ -118,6 +118,12 @@ class KompasApp:
         
         # Настройка для панели с инструментами
         style.configure('Toolbar.TButton', padding=3)
+        
+        # Настройка для Listbox (шаблоны)
+        self.root.option_add('*Listbox*font', ('Segoe UI', 10))
+        self.root.option_add('*Listbox*background', '#ffffff')
+        self.root.option_add('*Listbox*selectBackground', '#4a6984')
+        self.root.option_add('*Listbox*selectForeground', '#ffffff')
         
     def load_templates(self):
         """Загрузка шаблонов технических требований из файла JSON"""
@@ -386,12 +392,12 @@ class KompasApp:
         
         # Создание вкладок для категорий шаблонов
         self.template_tabs = ttk.Notebook(templates_frame)
-        self.template_tabs.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        self.template_tabs.pack(fill=tk.BOTH, expand=True, padx=8, pady=8)
         
         # Заполнение вкладок
         self.populate_template_tabs()
         
-        right_paned.add(templates_frame, weight=1)
+        right_paned.add(templates_frame, weight=2)
         
         # Блок с текущими техническими требованиями
         current_reqs_frame = ttk.LabelFrame(right_paned, text="Текущие технические требования")
@@ -418,18 +424,10 @@ class KompasApp:
         buttons_frame = ttk.Frame(current_reqs_frame)
         buttons_frame.pack(fill=tk.X, padx=5, pady=5)
         
-        ttk.Button(buttons_frame, text="Получить", 
-                  command=self.get_technical_requirements).pack(side=tk.LEFT, padx=5)
-        ttk.Button(buttons_frame, text="Сохранить", 
-                  command=self.save_technical_requirements).pack(side=tk.LEFT, padx=5)
-        ttk.Button(buttons_frame, text="Применить", 
-                  command=lambda: self.apply_technical_requirements()).pack(side=tk.LEFT, padx=5)
-        ttk.Button(buttons_frame, text="Очистить", 
-                  command=lambda: self.current_reqs_text.delete(1.0, tk.END)).pack(side=tk.LEFT, padx=5)
         
-        right_paned.add(current_reqs_frame, weight=2)
+        right_paned.add(current_reqs_frame, weight=3)
         
-        paned.add(right_frame, weight=2)
+        paned.add(right_frame, weight=3)
         
         # Создание строки статуса
         status_frame = ttk.Frame(self.root)
@@ -610,7 +608,7 @@ class KompasApp:
         self.root.bind("<Control-k>", lambda event: self.connect_to_kompas())
         self.root.bind("<Control-g>", lambda event: self.get_technical_requirements())
         self.root.bind("<Control-s>", lambda event: self.save_technical_requirements())
-        self.root.bind("<Control-a>", lambda event: self.apply_technical_requirements())
+        self.root.bind("<Control-e>", lambda event: self.apply_technical_requirements())
         self.root.bind("<F5>", lambda event: self.reload_templates())
         self.root.bind("<F6>", lambda event: self.update_documents_tree())
         self.root.bind("<Control-f>", lambda event: self.focus_search())
@@ -792,12 +790,17 @@ class KompasApp:
         all_tab = ttk.Frame(self.template_tabs)
         self.template_tabs.add(all_tab, text="Все")
         
+        # Создаем фрейм для Listbox и скроллбара
+        all_list_frame = ttk.Frame(all_tab)
+        all_list_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        
         # Listbox для всех шаблонов при поиске
-        all_listbox = tk.Listbox(all_tab)
-        all_listbox.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        all_listbox = tk.Listbox(all_list_frame, font=('Segoe UI', 10), activestyle='dotbox', 
+                                 selectbackground='#4a6984', selectforeground='white')
+        all_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         
         # Добавление прокрутки для вкладки "Все"
-        all_scrollbar = ttk.Scrollbar(all_listbox, orient="vertical", command=all_listbox.yview)
+        all_scrollbar = ttk.Scrollbar(all_list_frame, orient="vertical", command=all_listbox.yview)
         all_listbox.configure(yscrollcommand=all_scrollbar.set)
         all_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         
@@ -813,12 +816,17 @@ class KompasApp:
             tab = ttk.Frame(self.template_tabs)
             self.template_tabs.add(tab, text=category)
             
+            # Создаем фрейм для Listbox и скроллбара
+            list_frame = ttk.Frame(tab)
+            list_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+            
             # Создание и настройка Listbox для шаблонов
-            templates_listbox = tk.Listbox(tab)
-            templates_listbox.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+            templates_listbox = tk.Listbox(list_frame, font=('Segoe UI', 10), activestyle='dotbox', 
+                                          selectbackground='#4a6984', selectforeground='white')
+            templates_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
             
             # Добавление прокрутки
-            scrollbar = ttk.Scrollbar(templates_listbox, orient="vertical", command=templates_listbox.yview)
+            scrollbar = ttk.Scrollbar(list_frame, orient="vertical", command=templates_listbox.yview)
             templates_listbox.configure(yscrollcommand=scrollbar.set)
             scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
             
