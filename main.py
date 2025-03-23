@@ -10,7 +10,10 @@ from win32com.client import Dispatch, gencache
 import re
 import gc
 
+
+
 class KompasApp:
+
     def __init__(self, root):
         """Инициализация приложения"""
         self.root = root
@@ -37,6 +40,7 @@ class KompasApp:
         self.status_bar.pack(side=tk.BOTTOM, fill=tk.X)
         
         # Установка стиля
+        
         self.set_style()
         
         # Загрузка шаблонов
