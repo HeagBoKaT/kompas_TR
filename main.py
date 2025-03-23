@@ -424,14 +424,6 @@ class KompasApp:
         buttons_frame = ttk.Frame(current_reqs_frame)
         buttons_frame.pack(fill=tk.X, padx=5, pady=5)
         
-        ttk.Button(buttons_frame, text="Получить", 
-                  command=self.get_technical_requirements).pack(side=tk.LEFT, padx=5)
-        ttk.Button(buttons_frame, text="Сохранить", 
-                  command=self.save_technical_requirements).pack(side=tk.LEFT, padx=5)
-        ttk.Button(buttons_frame, text="Применить", 
-                  command=lambda: self.apply_technical_requirements()).pack(side=tk.LEFT, padx=5)
-        ttk.Button(buttons_frame, text="Очистить", 
-                  command=lambda: self.current_reqs_text.delete(1.0, tk.END)).pack(side=tk.LEFT, padx=5)
         
         right_paned.add(current_reqs_frame, weight=3)
         
