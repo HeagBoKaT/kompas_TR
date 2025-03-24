@@ -3,6 +3,7 @@ import sys
 import json
 from PyQt6.QtWidgets import (
     QApplication,
+    QListWidgetItem,
     QMainWindow,
     QWidget,
     QVBoxLayout,
@@ -611,6 +612,9 @@ class KompasApp(QMainWindow):
         all_list = QListWidget()
         all_layout.addWidget(all_list)
         self.template_tabs.addTab(all_tab, "Все")
+        all_list.itemDoubleClicked.connect(
+            lambda item: self.insert_template(item.data(Qt.ItemDataRole.UserRole))
+        )  # Изменено
 
         found_count = 0
 
@@ -622,6 +626,10 @@ class KompasApp(QMainWindow):
             self.template_tabs.addTab(tab, category)
 
             category_found_count = 0
+            # Подключаем сигнал один раз для всей вкладки, а не для каждого элемента
+            list_widget.itemDoubleClicked.connect(
+                lambda item: self.insert_template(item.text())
+            )
             for template in templates:
                 if (
                     search_term is None
@@ -629,13 +637,20 @@ class KompasApp(QMainWindow):
                     or search_term.lower() in template.lower()
                     or search_term.lower() in category.lower()
                 ):
+                    # Для категорийных вкладок
                     list_widget.addItem(template)
-                    all_list.addItem(f"[{category}] {template}")
+
+                    # Для вкладки "Все"
+                    all_item = QListWidgetItem(f"[{category}] {template}")
+                    all_item.setData(
+                        Qt.ItemDataRole.UserRole, template
+                    )  # Сохраняем оригинальный текст
+                    all_list.addItem(all_item)
+
                     category_found_count += 1
                     found_count += 1
-            list_widget.itemDoubleClicked.connect(
-                lambda item, lw=list_widget: self.insert_template(item.text())
-            )
+                # list_widget.itemDoubleClicked.connect(
+                #     lambda item, lw=list_widget: self.insert_template(item.text()))
 
         if search_term:
             self.template_tabs.setCurrentIndex(0)
@@ -732,7 +747,6 @@ class KompasApp(QMainWindow):
 
     def insert_template(self, template_text):
         """Вставка выбранного шаблона в текстовое поле"""
-        print("попытка вставить шаблон")
         if template_text:
             self.current_reqs_text.insertPlainText(template_text + "\n")
             self.status_bar.showMessage(f"Вставлен шаблон: {template_text[:30]}...")
@@ -795,6 +809,7 @@ class KompasApp(QMainWindow):
                 print(error_message)
                 self.status_bar.showMessage("Ошибка при получении тех. требований")
                 QMessageBox.critical(self, "Ошибка", error_message)
+
         except Exception as e:
             error_message = self.handle_kompas_error(e, "работы с документом")
             self.status_bar.showMessage("Ошибка при работе с документом")
@@ -928,6 +943,8 @@ class KompasApp(QMainWindow):
                     "Информация",
                     f"Технические требования успешно {'сохранены' if save_document else 'применены'} в {doc_name}",
                 )
+                # Автоматическое обновление технических требований после применения
+                self.get_technical_requirements()
             except Exception as e:
                 error_message = self.handle_kompas_error(
                     e, "применения технических требований"
