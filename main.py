@@ -633,7 +633,6 @@ class KompasApp(QMainWindow):
                     all_list.addItem(f"[{category}] {template}")
                     category_found_count += 1
                     found_count += 1
-
             list_widget.itemDoubleClicked.connect(
                 lambda item, lw=list_widget: self.insert_template(item.text())
             )
@@ -733,6 +732,7 @@ class KompasApp(QMainWindow):
 
     def insert_template(self, template_text):
         """Вставка выбранного шаблона в текстовое поле"""
+        print("попытка вставить шаблон")
         if template_text:
             self.current_reqs_text.insertPlainText(template_text + "\n")
             self.status_bar.showMessage(f"Вставлен шаблон: {template_text[:30]}...")
@@ -740,11 +740,13 @@ class KompasApp(QMainWindow):
     def get_technical_requirements(self):
         """Получение технических требований из активного документа"""
         try:
+            # Проверка подключения к KOMPAS-3D
             if not hasattr(self, "module7") or not self.module7:
                 self.connect_to_kompas()
                 if not hasattr(self, "module7") or not self.module7:
                     return
 
+            # Проверка наличия активного документа
             active_doc = self.app7.ActiveDocument
             if not active_doc:
                 self.status_bar.showMessage("Нет активного документа")
@@ -754,38 +756,43 @@ class KompasApp(QMainWindow):
                 return
 
             try:
+                # Получение интерфейса чертежа и технических требований
                 drawing_document = self.module7.IDrawingDocument(active_doc)
                 tech_demand = drawing_document.TechnicalDemand
 
+                # Проверка, созданы ли технические требования
                 if not tech_demand.IsCreated:
+                    # Создание новых пустых технических требований
+                    tt = tech_demand.Text
+                    stroka = tt.Add().Add()
+                    stroka.Str = "  "
+                    # tech_demand.Create()
                     self.status_bar.showMessage(
-                        "В документе отсутствуют технические требования!"
+                        "Созданы новые пустые технические требования"
                     )
-                    QMessageBox.warning(
-                        self,
-                        "Внимание",
-                        "В документе отсутствуют технические требования!",
-                    )
+                    self.current_reqs_text.setPlainText("")
                     return
 
+                # Получение текста технических требований
                 text = tech_demand.Text
                 if text.Count == 0:
-                    self.status_bar.showMessage("Технические требования пусты!")
-                    QMessageBox.warning(
-                        self, "Внимание", "Технические требования есть, но они пусты!"
-                    )
+                    self.status_bar.showMessage("Технические требования пусты")
+                    self.current_reqs_text.setPlainText("")
                     return
 
+                # Парсинг и отображение существующих требований
                 formatted_text = self.parse_tech_req(text)
                 self.current_reqs_text.setPlainText(formatted_text)
                 doc_name = active_doc.Name
                 self.status_bar.showMessage(
                     f"Технические требования загружены из {doc_name}"
                 )
+                print(tech_demand.BlocksStartLineNumbers)
             except Exception as e:
                 error_message = self.handle_kompas_error(
                     e, "получения технических требований"
                 )
+                print(error_message)
                 self.status_bar.showMessage("Ошибка при получении тех. требований")
                 QMessageBox.critical(self, "Ошибка", error_message)
         except Exception as e:
@@ -839,7 +846,9 @@ class KompasApp(QMainWindow):
                     return
 
                 if not tech_demand.IsCreated:
-                    tech_demand.Create()
+                    tt = tech_demand.Text
+                    stroka = tt.Add().Add()
+                    stroka.Str = "  "
 
                 text_obj = tech_demand.Text
                 while text_obj.Count > 0:
