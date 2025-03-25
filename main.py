@@ -5,6 +5,7 @@ from PyQt6.QtWidgets import (
     QApplication,
     QListWidgetItem,
     QMainWindow,
+    QStyle,
     QWidget,
     QVBoxLayout,
     QHBoxLayout,
@@ -340,7 +341,7 @@ class KompasApp(QMainWindow):
         self.docs_count_label = QLabel("Документов: 0")
         self.status_bar.addPermanentWidget(self.docs_count_label)
 
-        version_label = QLabel("v1.0 (2025)")
+        version_label = QLabel("v1.0.2 (2025)")
         self.status_bar.addPermanentWidget(version_label)
 
     def load_templates(self):
@@ -627,7 +628,12 @@ class KompasApp(QMainWindow):
                         or not search_term
                         or search_term.lower() in text.lower()
                         or any(
-                            search_term.lower() in variant.lower()
+                            search_term.lower()
+                            in (
+                                variant.get("text", "")
+                                if isinstance(variant, dict)
+                                else variant
+                            ).lower()
                             for variant in variants
                         )
                     ):
@@ -683,19 +689,56 @@ class KompasApp(QMainWindow):
             return
 
         menu = QMenu(self)
+        style = self.style()
+
         for variant in template["variants"]:
-            action = QAction(variant, self)
-            action.triggered.connect(
-                lambda checked, v=variant: self.insert_template_variant(
-                    template["text"], v
+            if isinstance(variant, dict):
+                variant_text = variant.get("text", "")
+                custom_input = variant.get("custom_input", False)
+            else:
+                variant_text = variant
+                custom_input = False
+
+            action = QAction(variant_text, self)
+            if custom_input:
+                icon = style.standardIcon(
+                    QStyle.StandardPixmap.SP_FileDialogDetailedView
                 )
-            )
+                action.setIcon(icon)
+
+            if custom_input:
+                action.triggered.connect(
+                    lambda checked, t=template[
+                        "text"
+                    ], v=variant_text: self.insert_custom_variant(t, v)
+                )
+            else:
+                action.triggered.connect(
+                    lambda checked, t=template[
+                        "text"
+                    ], v=variant_text: self.insert_template_variant(t, v)
+                )
             menu.addAction(action)
 
         menu.exec(list_widget.mapToGlobal(pos))
 
-    def insert_template_variant(self, base_text, variant):
-        full_text = f"{base_text}: {variant}"
+    def insert_custom_variant(self, base_text, variant_text):
+        custom_value, ok = QInputDialog.getText(
+            self, "Ввод значения", f"Введите значение для {variant_text}:"
+        )
+        if ok and custom_value:
+            # Проверяем, есть ли в variant_text маркер {}
+            if "{}" in variant_text:
+                # Вставляем значение в место, указанное маркером
+                full_text = f"{base_text} {variant_text.format(custom_value)}"
+            else:
+                # Запасной вариант: старый порядок
+                full_text = f"{base_text} {custom_value} {variant_text}"
+            self.current_reqs_text.insertPlainText(full_text + "\n")
+            self.status_bar.showMessage(f"Вставлен шаблон: {full_text[:30]}...")
+
+    def insert_template_variant(self, base_text, variant_text):
+        full_text = f"{base_text} {variant_text}"
         self.current_reqs_text.insertPlainText(full_text + "\n")
         self.status_bar.showMessage(f"Вставлен шаблон: {full_text[:30]}...")
 
@@ -850,7 +893,6 @@ class KompasApp(QMainWindow):
                 self.status_bar.showMessage(
                     f"Технические требования загружены из {doc_name}"
                 )
-                print(tech_demand.BlocksStartLineNumbers)
             except Exception as e:
                 error_message = self.handle_kompas_error(
                     e, "получения технических требований"
