@@ -501,7 +501,7 @@
  [],
  False,
  False,
- 1742819539,
+ 1742888289,
  [('runw.exe',
    'E:\\kompas_TR\\.venv\\lib\\site-packages\\PyInstaller\\bootloader\\Windows-64bit-intel\\runw.exe',
    'EXECUTABLE')],
