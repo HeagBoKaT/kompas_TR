@@ -5,6 +5,7 @@ from PyQt6.QtWidgets import (
     QApplication,
     QListWidgetItem,
     QMainWindow,
+    QStyle,
     QWidget,
     QVBoxLayout,
     QHBoxLayout,
@@ -340,11 +341,10 @@ class KompasApp(QMainWindow):
         self.docs_count_label = QLabel("Документов: 0")
         self.status_bar.addPermanentWidget(self.docs_count_label)
 
-        version_label = QLabel("v1.0 (2025)")
+        version_label = QLabel("v1.0.2 (2025)")
         self.status_bar.addPermanentWidget(version_label)
 
     def load_templates(self):
-        """Загрузка шаблонов технических требований из файла JSON"""
         try:
             user_home = os.path.expanduser("~")
             app_folder = os.path.join(user_home, "KOMPAS-TR")
@@ -354,20 +354,8 @@ class KompasApp(QMainWindow):
 
             if not os.path.exists(self.templates_file):
                 self.status_bar.showMessage("Файл шаблонов не найден, создаем новый")
-                old_templates_file = os.path.join(
-                    os.path.dirname(os.path.abspath(__file__)), "templates.json"
-                )
-                if os.path.exists(old_templates_file):
-                    with open(old_templates_file, "r", encoding="utf-8") as f_old:
-                        templates_data = json.load(f_old)
-                    with open(self.templates_file, "w", encoding="utf-8") as f_new:
-                        json.dump(templates_data, f_new, ensure_ascii=False, indent=4)
-                    self.status_bar.showMessage(
-                        "Файл шаблонов перенесен в папку пользователя"
-                    )
-                else:
-                    with open(self.templates_file, "w", encoding="utf-8") as f:
-                        json.dump({"Общие": []}, f, ensure_ascii=False, indent=4)
+                with open(self.templates_file, "w", encoding="utf-8") as f:
+                    json.dump({"Общие": []}, f, ensure_ascii=False, indent=4)
 
             with open(self.templates_file, "r", encoding="utf-8") as f:
                 self.templates = json.load(f)
@@ -603,7 +591,6 @@ class KompasApp(QMainWindow):
         QMessageBox.information(self, "Горячие клавиши", shortcuts_text)
 
     def populate_template_tabs(self, search_term=None):
-        """Заполнение вкладок шаблонами технических требований"""
         self.template_tabs.clear()
 
         # Вкладка "Все"
@@ -612,9 +599,11 @@ class KompasApp(QMainWindow):
         all_list = QListWidget()
         all_layout.addWidget(all_list)
         self.template_tabs.addTab(all_tab, "Все")
-        all_list.itemDoubleClicked.connect(
-            lambda item: self.insert_template(item.data(Qt.ItemDataRole.UserRole))
-        )  # Изменено
+        all_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        all_list.customContextMenuRequested.connect(
+            lambda pos: self.show_template_context_menu(pos, all_list)
+        )
+        all_list.itemDoubleClicked.connect(self.insert_template)
 
         found_count = 0
 
@@ -624,33 +613,59 @@ class KompasApp(QMainWindow):
             list_widget = QListWidget()
             tab_layout.addWidget(list_widget)
             self.template_tabs.addTab(tab, category)
-
-            category_found_count = 0
-            # Подключаем сигнал один раз для всей вкладки, а не для каждого элемента
-            list_widget.itemDoubleClicked.connect(
-                lambda item: self.insert_template(item.text())
+            list_widget.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+            list_widget.customContextMenuRequested.connect(
+                lambda pos, lw=list_widget: self.show_template_context_menu(pos, lw)
             )
+            list_widget.itemDoubleClicked.connect(self.insert_template)
+
             for template in templates:
-                if (
-                    search_term is None
-                    or not search_term
-                    or search_term.lower() in template.lower()
-                    or search_term.lower() in category.lower()
-                ):
-                    # Для категорийных вкладок
-                    list_widget.addItem(template)
+                if isinstance(template, dict):
+                    text = template.get("text", "")
+                    variants = template.get("variants", [])
+                    if (
+                        search_term is None
+                        or not search_term
+                        or search_term.lower() in text.lower()
+                        or any(
+                            search_term.lower()
+                            in (
+                                variant.get("text", "")
+                                if isinstance(variant, dict)
+                                else variant
+                            ).lower()
+                            for variant in variants
+                        )
+                    ):
+                        # Для категорийных вкладок
+                        item = QListWidgetItem(text)
+                        item.setData(Qt.ItemDataRole.UserRole, template)
+                        list_widget.addItem(item)
 
-                    # Для вкладки "Все"
-                    all_item = QListWidgetItem(f"[{category}] {template}")
-                    all_item.setData(
-                        Qt.ItemDataRole.UserRole, template
-                    )  # Сохраняем оригинальный текст
-                    all_list.addItem(all_item)
+                        # Для вкладки "Все"
+                        all_item = QListWidgetItem(f"[{category}] {text}")
+                        all_item.setData(Qt.ItemDataRole.UserRole, template)
+                        all_list.addItem(all_item)
 
-                    category_found_count += 1
-                    found_count += 1
-                # list_widget.itemDoubleClicked.connect(
-                #     lambda item, lw=list_widget: self.insert_template(item.text()))
+                        found_count += 1
+                else:
+                    # Обратная совместимость со старым форматом
+                    if (
+                        search_term is None
+                        or not search_term
+                        or search_term.lower() in template.lower()
+                    ):
+                        item = QListWidgetItem(template)
+                        item.setData(
+                            Qt.ItemDataRole.UserRole, {"text": template, "variants": []}
+                        )
+                        list_widget.addItem(item)
+                        all_item = QListWidgetItem(f"[{category}] {template}")
+                        all_item.setData(
+                            Qt.ItemDataRole.UserRole, {"text": template, "variants": []}
+                        )
+                        all_list.addItem(all_item)
+                        found_count += 1
 
         if search_term:
             self.template_tabs.setCurrentIndex(0)
@@ -659,6 +674,73 @@ class KompasApp(QMainWindow):
             )
         else:
             self.status_bar.showMessage("Показаны все шаблоны")
+
+    def show_template_context_menu(self, pos, list_widget):
+        item = list_widget.itemAt(pos)
+        if not item:
+            return
+
+        template = item.data(Qt.ItemDataRole.UserRole)
+        if (
+            not isinstance(template, dict)
+            or "variants" not in template
+            or not template["variants"]
+        ):
+            return
+
+        menu = QMenu(self)
+        style = self.style()
+
+        for variant in template["variants"]:
+            if isinstance(variant, dict):
+                variant_text = variant.get("text", "")
+                custom_input = variant.get("custom_input", False)
+            else:
+                variant_text = variant
+                custom_input = False
+
+            action = QAction(variant_text, self)
+            if custom_input:
+                icon = style.standardIcon(
+                    QStyle.StandardPixmap.SP_FileDialogDetailedView
+                )
+                action.setIcon(icon)
+
+            if custom_input:
+                action.triggered.connect(
+                    lambda checked, t=template[
+                        "text"
+                    ], v=variant_text: self.insert_custom_variant(t, v)
+                )
+            else:
+                action.triggered.connect(
+                    lambda checked, t=template[
+                        "text"
+                    ], v=variant_text: self.insert_template_variant(t, v)
+                )
+            menu.addAction(action)
+
+        menu.exec(list_widget.mapToGlobal(pos))
+
+    def insert_custom_variant(self, base_text, variant_text):
+        custom_value, ok = QInputDialog.getText(
+            self, "Ввод значения", f"Введите значение для {variant_text}:"
+        )
+        if ok and custom_value:
+            # Проверяем, есть ли в variant_text маркер {}
+            if "{}" in variant_text:
+                # Вставляем значение в место, указанное маркером
+                full_text = f"{base_text} {variant_text.format(custom_value)}"
+            else:
+                # Запасной вариант: старый порядок
+                full_text = f"{base_text} {custom_value} {variant_text}"
+            self.current_reqs_text.insertPlainText(full_text + "\n")
+            self.status_bar.showMessage(f"Вставлен шаблон: {full_text[:30]}...")
+
+    def insert_template_variant(self, base_text, variant_text):
+        full_text = f"{base_text} {variant_text}"
+        self.current_reqs_text.insertPlainText(full_text + "\n")
+        self.status_bar.showMessage(f"Вставлен шаблон: {full_text[:30]}...")
 
     def update_active_document_info(self):
         """Обновление информации об активном документе"""
@@ -745,11 +827,21 @@ class KompasApp(QMainWindow):
             QMessageBox.critical(self, "Ошибка", error_message)
             return False
 
-    def insert_template(self, template_text):
-        """Вставка выбранного шаблона в текстовое поле"""
-        if template_text:
-            self.current_reqs_text.insertPlainText(template_text + "\n")
-            self.status_bar.showMessage(f"Вставлен шаблон: {template_text[:30]}...")
+    def insert_template(self, item):
+        template = item.data(Qt.ItemDataRole.UserRole)
+        if isinstance(template, dict):
+            text = template.get("text", "")
+            variants = template.get("variants", [])
+            if variants:
+                # Вставляем первую вариацию по умолчанию при двойном клике
+                self.insert_template_variant(text, variants[0])
+            else:
+                self.current_reqs_text.insertPlainText(text + "\n")
+                self.status_bar.showMessage(f"Вставлен шаблон: {text[:30]}...")
+        else:
+            # Обратная совместимость со старым форматом
+            self.current_reqs_text.insertPlainText(template + "\n")
+            self.status_bar.showMessage(f"Вставлен шаблон: {template[:30]}...")
 
     def get_technical_requirements(self):
         """Получение технических требований из активного документа"""
@@ -801,7 +893,6 @@ class KompasApp(QMainWindow):
                 self.status_bar.showMessage(
                     f"Технические требования загружены из {doc_name}"
                 )
-                print(tech_demand.BlocksStartLineNumbers)
             except Exception as e:
                 error_message = self.handle_kompas_error(
                     e, "получения технических требований"
