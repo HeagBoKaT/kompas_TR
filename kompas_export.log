@@ -1,0 +1,16 @@
+2025-03-26 14:30:28,799 - INFO - Запуск приложения для экспорта чертежа Kompas-3D в PDF.
+2025-03-26 14:30:28,828 - ERROR - Активный документ не является чертежом.
+2025-03-26 14:30:28,829 - INFO - Приложение завершило работу.
+2025-03-26 14:31:40,978 - INFO - Запуск приложения для экспорта чертежа Kompas-3D в PDF.
+2025-03-26 14:31:41,008 - ERROR - Активный документ не является чертежом.
+2025-03-26 14:31:41,010 - INFO - Приложение завершило работу.
+2025-03-26 14:34:15,049 - INFO - Запуск приложения для экспорта чертежа Kompas-3D в PDF.
+2025-03-26 14:34:15,076 - INFO - Тип документа: 1
+2025-03-26 14:34:15,077 - ERROR - Произошла ошибка: ksDocumentDrawing
+Traceback (most recent call last):
+  File "E:\kompas_TR\test.py", line 26, in save_active_drawing_to_pdf
+    if active_doc.DocumentType != constants.ksDocumentDrawing:
+  File "E:\kompas_TR\.venv\lib\site-packages\win32com\client\__init__.py", line 225, in __getattr__
+    raise AttributeError(a)
+AttributeError: ksDocumentDrawing
+2025-03-26 14:34:15,079 - INFO - Приложение завершило работу.
