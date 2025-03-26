@@ -55,7 +55,16 @@ import gc
 class KompasApp(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.dark_mode = False
+        # Инициализация пути к файлу настроек
+        user_home = os.path.expanduser("~")
+        app_folder = os.path.join(user_home, "KOMPAS-TR")
+        if not os.path.exists(app_folder):
+            os.makedirs(app_folder)
+        self.settings_file = os.path.join(app_folder, "settings.json")
+
+        # Загружаем настройки темы (по умолчанию светлая)
+        self.dark_mode = self.load_theme_setting()
+
         self.status_bar = self.statusBar()
         self.status_bar.showMessage("Приложение запущено")
         self.setWindowTitle("Редактор технических требований KOMPAS-3D")
@@ -74,7 +83,7 @@ class KompasApp(QMainWindow):
         self.auto_numbering_var = False
 
         self.load_templates()
-        ThemeManager.apply_theme(self, self.dark_mode)  # Применяем начальную тему
+        ThemeManager.apply_theme(self, self.dark_mode)  # Применяем загруженную тему
         self.create_ui()
 
         self.module7 = None
@@ -88,10 +97,38 @@ class KompasApp(QMainWindow):
 
         self.timer = QTimer()
         self.timer.timeout.connect(self.periodic_update)
-        self.timer.start(2000)
+        self.timer.start(1000)
 
     def apply_theme(self):
         ThemeManager.apply_theme(self, self.dark_mode)
+
+    def load_theme_setting(self):
+        """Загрузка настройки темы из файла"""
+        try:
+            if not os.path.exists(self.settings_file):
+                # Если файла нет, создаем с темой по умолчанию (светлая)
+                default_settings = {"dark_mode": False}
+                with open(self.settings_file, "w", encoding="utf-8") as f:
+                    json.dump(default_settings, f, ensure_ascii=False, indent=4)
+                return False
+
+            with open(self.settings_file, "r", encoding="utf-8") as f:
+                settings = json.load(f)
+                return settings.get("dark_mode", False)  # По умолчанию светлая
+        except Exception as e:
+            self.status_bar.showMessage(f"Ошибка загрузки настроек темы: {str(e)}")
+            # В случае ошибки возвращаем светлую тему
+            return False
+
+    def save_theme_setting(self):
+        """Сохранение настройки темы в файл"""
+        try:
+            settings = {"dark_mode": self.dark_mode}
+            with open(self.settings_file, "w", encoding="utf-8") as f:
+                json.dump(settings, f, ensure_ascii=False, indent=4)
+            self.status_bar.showMessage("Настройки темы сохранены")
+        except Exception as e:
+            self.status_bar.showMessage(f"Ошибка сохранения настроек темы: {str(e)}")
 
     def create_ui(self):
         """Создание пользовательского интерфейса"""
@@ -389,7 +426,7 @@ class KompasApp(QMainWindow):
         self.docs_count_label = QLabel("Документов: 0")
         self.status_bar.addPermanentWidget(self.docs_count_label)
 
-        version_label = QLabel("v1.0.3 (2025)")
+        version_label = QLabel("v1.0.4 (2025)")
         self.status_bar.addPermanentWidget(version_label)
 
     def load_templates(self):
@@ -764,7 +801,7 @@ class KompasApp(QMainWindow):
             self.status_bar.showMessage(f"Вставлен шаблон: {full_text[:30]}...")
 
     def insert_template_variant(self, base_text, variant_text):
-        full_text = f"{base_text} {variant_text}"
+        full_text = f"{base_text}{variant_text}"
         self.current_reqs_text.insertPlainText(full_text + "\n")
         self.status_bar.showMessage(f"Вставлен шаблон: {full_text[:30]}...")
 
@@ -1543,8 +1580,11 @@ class KompasApp(QMainWindow):
         return line.strip()
 
     def toggle_theme(self):
+        """Переключение темы с сохранением"""
         self.dark_mode = not self.dark_mode
         self.apply_theme()
+        # Сохраняем настройку после переключения
+        self.save_theme_setting()
         # Обновляем тему для всех открытых дочерних окон
         for child in self.findChildren(TemplateEditorDialog):
             child.dark_mode = self.dark_mode
@@ -1555,34 +1595,11 @@ class KompasApp(QMainWindow):
 
     def save_to_pdf(self):
         """Сохранение активного чертежа в PDF с пошаговым логированием"""
-        # Настройка логирования
-        log_folder = "logs"
-        if not os.path.exists(log_folder):
-            os.makedirs(log_folder)
-
-        log_filename = os.path.join(
-            log_folder,
-            f"kompas_pdf_export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log",
-        )
-
-        logging.basicConfig(
-            level=logging.INFO,
-            format="%(asctime)s - %(levelname)s - %(message)s",
-            handlers=[
-                logging.FileHandler(log_filename, encoding="utf-8"),
-                logging.StreamHandler(sys.stdout),  # Вывод в консоль для отладки
-            ],
-        )
-
-        logging.info("Начало процесса сохранения активного чертежа в PDF")
-
         try:
             # Проверка подключения к KOMPAS-3D
             if not hasattr(self, "app7") or not self.app7:
-                logging.error("KOMPAS-3D не подключен. Попытка подключения...")
                 self.connect_to_kompas()
                 if not hasattr(self, "app7") or not self.app7:
-                    logging.error("Не удалось подключиться к KOMPAS-3D")
                     self.status_bar.showMessage("Не удалось подключиться к KOMPAS-3D")
                     QMessageBox.critical(
                         self, "Ошибка", "Не удалось подключиться к KOMPAS-3D"
@@ -1592,7 +1609,6 @@ class KompasApp(QMainWindow):
             # Проверка активного документа
             active_doc = self.app7.ActiveDocument
             if not active_doc:
-                logging.error("Нет активного документа")
                 self.status_bar.showMessage("Нет активного документа")
                 QMessageBox.warning(
                     self, "Ошибка", "Нет активного документа в KOMPAS-3D"
@@ -1600,54 +1616,32 @@ class KompasApp(QMainWindow):
                 return
 
             doc_name = active_doc.Name
-            logging.info(f"Найден активный документ: {doc_name}")
 
             # Проверка типа документа (должен быть чертеж)
             doc_type = active_doc.DocumentType
             if doc_type != 1:  # 1 - это тип чертежа
-                logging.error(
-                    f"Активный документ не является чертежом (тип: {doc_type})"
-                )
                 self.status_bar.showMessage("Активный документ не является чертежом")
                 QMessageBox.warning(
                     self, "Ошибка", "Активный документ должен быть чертежом"
                 )
                 return
-
-            logging.info("Документ подтвержден как чертеж")
-
             # Получение пути к файлу
             doc_path = active_doc.PathName
             if not doc_path:
-                logging.error(
-                    "Документ не сохранен. Нужно сначала сохранить его в KOMPAS-3D"
-                )
                 self.status_bar.showMessage("Документ не сохранен")
                 QMessageBox.warning(self, "Ошибка", "Сначала сохраните документ")
                 return
-
-            logging.info(f"Путь к документу: {doc_path}")
 
             # Формирование пути для PDF
             doc_dir = os.path.dirname(doc_path)
             doc_name_without_ext = os.path.splitext(os.path.basename(doc_path))[0]
             pdf_folder = os.path.join(doc_dir, "Чертежи в pdf")
 
-            if not os.path.exists(pdf_folder):
-                os.makedirs(pdf_folder)
-                logging.info(f"Создана папка для PDF: {pdf_folder}")
-            else:
-                logging.info(f"Папка уже существует: {pdf_folder}")
-
             pdf_path = os.path.join(pdf_folder, f"{doc_name_without_ext}.pdf")
-            logging.info(f"Файл будет сохранен как: {pdf_path}")
-
             # Получение 2D интерфейса документа
             try:
                 doc_2d = win32com.client.Dispatch(active_doc, "ksDocument2D")
-                logging.info("Получен 2D интерфейс документа")
             except Exception as e:
-                logging.error(f"Ошибка при получении 2D интерфейса: {str(e)}")
                 self.status_bar.showMessage("Ошибка при получении интерфейса документа")
                 QMessageBox.critical(
                     self, "Ошибка", f"Не удалось получить 2D интерфейс: {str(e)}"
@@ -1658,13 +1652,11 @@ class KompasApp(QMainWindow):
             try:
                 result = doc_2d.SaveAs(pdf_path)
                 if result:
-                    logging.info(f"Чертеж успешно сохранен в PDF: {pdf_path}")
                     self.status_bar.showMessage(f"Чертеж сохранен в PDF: {pdf_path}")
                     QMessageBox.information(
                         self, "Успех", f"Чертеж сохранен в PDF:\n{pdf_path}"
                     )
             except Exception as e:
-                logging.error(f"Ошибка при сохранении в PDF: {str(e)}")
                 self.status_bar.showMessage("Ошибка при сохранении в PDF")
                 QMessageBox.critical(
                     self, "Ошибка", f"Ошибка сохранения в PDF: {str(e)}"
@@ -1673,7 +1665,6 @@ class KompasApp(QMainWindow):
 
         except Exception as e:
             error_message = self.handle_kompas_error(e, "сохранения в PDF")
-            logging.error(f"Критическая ошибка: {error_message}")
             self.status_bar.showMessage("Критическая ошибка при сохранении в PDF")
             QMessageBox.critical(self, "Ошибка", error_message)
 
