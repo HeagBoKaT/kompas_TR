@@ -426,7 +426,7 @@ class KompasApp(QMainWindow):
         self.docs_count_label = QLabel("Документов: 0")
         self.status_bar.addPermanentWidget(self.docs_count_label)
 
-        version_label = QLabel("v1.0.4 (2025)")
+        version_label = QLabel("v1.1.0 (2025)")
         self.status_bar.addPermanentWidget(version_label)
 
     def load_templates(self):
@@ -1916,7 +1916,6 @@ class TemplateEditorDialog(QDialog):
         self.variants_table.removeRow(selected)
 
     def add_template(self):
-        """Добавление нового шаблона"""
         category = self.category_combo.currentText().strip()
         text = self.template_text.text().strip()
         if not category or not text:
@@ -1926,11 +1925,16 @@ class TemplateEditorDialog(QDialog):
         # Собираем варианты из таблицы
         variants = []
         for row in range(self.variants_table.rowCount()):
-            text = self.variants_table.item(row, 0).text()
+            variant_text = self.variants_table.item(
+                row, 0
+            ).text()  # Исправлено: variant_text вместо text
             custom_input = self.variants_table.item(row, 1).text() == "Да"
-            variants.append({"text": text, "custom_input": custom_input})
+            variants.append({"text": variant_text, "custom_input": custom_input})
 
-        new_template = {"text": text, "variants": variants}
+        new_template = {
+            "text": text,
+            "variants": variants,
+        }  # Основной текст сохраняется корректно
 
         if category not in self.templates:
             self.templates[category] = []
