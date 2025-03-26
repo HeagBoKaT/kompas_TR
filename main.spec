@@ -1,49 +1,56 @@
 # -*- mode: python ; coding: utf-8 -*-
 
-import os
-
-block_cipher = None
-
 a = Analysis(
     ['main.py'],
-    pathex=['E:\\Kompas'],
+    pathex=[],
     binaries=[],
     datas=[
-        # Файл templates.json теперь хранится в папке пользователя
-        ('icons', 'icon'),  # Включаем папку с иконками
+        ('icons/icon.ico', 'icons'),  # Добавляем иконку как ресурс
+        # Если используются другие файлы (например, templates.json, settings.json), добавьте их:
+        # ('templates.json', '.'),
+        # ('settings.json', '.'),
     ],
-    hiddenimports=['win32com.client', 'win32com.client.gencache', 'pythoncom'],
+    hiddenimports=[
+        # PyQt6 модули
+        'PyQt6',
+        'PyQt6.QtWidgets',
+        'PyQt6.QtGui',
+        'PyQt6.QtCore',
+        # COM-объекты для работы с KOMPAS-3D
+        'win32com',
+        'win32com.client',
+        'pythoncom',
+        # Дополнительные модули из win32com
+        'win32com.client.Dispatch',
+        'win32com.client.gencache',
+    ],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
     excludes=[],
-    win_no_prefer_redirects=False,
-    win_private_assemblies=False,
-    cipher=block_cipher,
     noarchive=False,
+    optimize=0,
 )
-
-pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
+pyz = PYZ(a.pure)
 
 exe = EXE(
     pyz,
     a.scripts,
     a.binaries,
-    a.zipfiles,
     a.datas,
     [],
-    name='KOMPAS-Технические требования',
+    name='KOMPAS-TR',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
-    upx=True,
+    upx=False,  # Убедитесь, что UPX установлен, иначе установите False
     upx_exclude=[],
     runtime_tmpdir=None,
-    console=False,
+    console=False,  # Отключаем консоль для GUI-приложения
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon='icons/icon.ico',
+    icon=['icons\\icon.ico'],  # Иконка для .exe
 )

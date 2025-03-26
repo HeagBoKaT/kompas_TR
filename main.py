@@ -1,11 +1,16 @@
 import os
 import sys
 import json
+import logging
+from datetime import datetime
 from PyQt6.QtWidgets import (
     QApplication,
+    QHeaderView,
     QListWidgetItem,
     QMainWindow,
     QStyle,
+    QTableWidget,
+    QTableWidgetItem,
     QWidget,
     QVBoxLayout,
     QHBoxLayout,
@@ -26,6 +31,16 @@ from PyQt6.QtWidgets import (
     QMessageBox,
     QInputDialog,
     QScrollBar,
+    QDialog,
+    QVBoxLayout,
+    QHBoxLayout,
+    QTreeWidget,
+    QTreeWidgetItem,
+    QLineEdit,
+    QComboBox,
+    QTextEdit,
+    QLabel,
+    QMessageBox,
 )
 
 from PyQt6.QtGui import QIcon, QFont, QTextCharFormat, QTextCursor, QAction
@@ -40,8 +55,18 @@ import gc
 class KompasApp(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.status_bar = self.statusBar()  # Инициализация статусной строки
-        self.status_bar.showMessage("Приложение запущено")  # Теперь работает
+        # Инициализация пути к файлу настроек
+        user_home = os.path.expanduser("~")
+        app_folder = os.path.join(user_home, "KOMPAS-TR")
+        if not os.path.exists(app_folder):
+            os.makedirs(app_folder)
+        self.settings_file = os.path.join(app_folder, "settings.json")
+
+        # Загружаем настройки темы (по умолчанию светлая)
+        self.dark_mode = self.load_theme_setting()
+
+        self.status_bar = self.statusBar()
+        self.status_bar.showMessage("Приложение запущено")
         self.setWindowTitle("Редактор технических требований KOMPAS-3D")
         self.setGeometry(100, 100, 1400, 900)
         self.setMinimumSize(1000, 700)
@@ -53,32 +78,57 @@ class KompasApp(QMainWindow):
         if os.path.exists(icon_path):
             self.setWindowIcon(QIcon(icon_path))
 
-        # Инициализация переменных
         self.templates = {}
         self.template_search_var = ""
         self.auto_numbering_var = False
 
-        # Загрузка шаблонов
         self.load_templates()
-
-        # Создание пользовательского интерфейса
+        ThemeManager.apply_theme(self, self.dark_mode)  # Применяем загруженную тему
         self.create_ui()
 
-        # Подключение к API Kompas
         self.module7 = None
         self.api7 = None
         self.const7 = None
         self.app7 = None
         self.connect_to_kompas()
 
-        # Обновление информации
         self.update_active_document_info()
         self.update_documents_tree()
 
-        # Периодическое обновление информации о документах
         self.timer = QTimer()
         self.timer.timeout.connect(self.periodic_update)
         self.timer.start(1000)
+
+    def apply_theme(self):
+        ThemeManager.apply_theme(self, self.dark_mode)
+
+    def load_theme_setting(self):
+        """Загрузка настройки темы из файла"""
+        try:
+            if not os.path.exists(self.settings_file):
+                # Если файла нет, создаем с темой по умолчанию (светлая)
+                default_settings = {"dark_mode": False}
+                with open(self.settings_file, "w", encoding="utf-8") as f:
+                    json.dump(default_settings, f, ensure_ascii=False, indent=4)
+                return False
+
+            with open(self.settings_file, "r", encoding="utf-8") as f:
+                settings = json.load(f)
+                return settings.get("dark_mode", False)  # По умолчанию светлая
+        except Exception as e:
+            self.status_bar.showMessage(f"Ошибка загрузки настроек темы: {str(e)}")
+            # В случае ошибки возвращаем светлую тему
+            return False
+
+    def save_theme_setting(self):
+        """Сохранение настройки темы в файл"""
+        try:
+            settings = {"dark_mode": self.dark_mode}
+            with open(self.settings_file, "w", encoding="utf-8") as f:
+                json.dump(settings, f, ensure_ascii=False, indent=4)
+            self.status_bar.showMessage("Настройки темы сохранены")
+        except Exception as e:
+            self.status_bar.showMessage(f"Ошибка сохранения настроек темы: {str(e)}")
 
     def create_ui(self):
         """Создание пользовательского интерфейса"""
@@ -126,6 +176,12 @@ class KompasApp(QMainWindow):
         apply_req_action.triggered.connect(lambda: self.apply_technical_requirements())
         file_menu.addAction(apply_req_action)
 
+        # Добавляем действие для сохранения в PDF
+        save_pdf_action = QAction("Сохранить в PDF", self)
+        save_pdf_action.setShortcut("Ctrl+Shift+S")
+        save_pdf_action.triggered.connect(self.save_to_pdf)
+        file_menu.addAction(save_pdf_action)
+
         file_menu.addSeparator()
 
         disconnect_action = QAction("Отключиться от KOMPAS-3D", self)
@@ -139,7 +195,7 @@ class KompasApp(QMainWindow):
         exit_action.triggered.connect(self.close)
         file_menu.addAction(exit_action)
 
-        # Меню "Инструменты"
+        # Меню "Инструменты" (без изменений)
         tools_menu = menu_bar.addMenu("Инструменты")
         edit_templates_action = QAction("Редактировать файл шаблонов", self)
         edit_templates_action.triggered.connect(self.edit_templates_file)
@@ -157,7 +213,12 @@ class KompasApp(QMainWindow):
         refresh_docs_action.triggered.connect(self.update_documents_tree)
         tools_menu.addAction(refresh_docs_action)
 
-        # Меню "Помощь"
+        theme_action = QAction("Переключить тему", self)
+        theme_action.setShortcut("Ctrl+T")
+        theme_action.triggered.connect(self.toggle_theme)
+        tools_menu.addAction(theme_action)
+
+        # Меню "Помощь" (без изменений)
         help_menu = menu_bar.addMenu("Помощь")
         about_action = QAction("О программе", self)
         about_action.triggered.connect(self.show_about)
@@ -216,6 +277,12 @@ class KompasApp(QMainWindow):
         apply_btn.triggered.connect(lambda: self.apply_technical_requirements())
         toolbar.addAction(apply_btn)
 
+        # Кнопка сохранения в PDF
+        save_pdf_btn = QAction("📄", self)
+        save_pdf_btn.setToolTip("Сохранить в PDF (Ctrl+Shift+S)")
+        save_pdf_btn.triggered.connect(self.save_to_pdf)
+        toolbar.addAction(save_pdf_btn)
+
         toolbar.addSeparator()
 
         # Кнопка редактирования шаблонов
@@ -245,7 +312,13 @@ class KompasApp(QMainWindow):
         self.active_doc_label = QLabel("Нет активного документа")
         self.active_doc_label.setWordWrap(True)
         doc_layout.addWidget(self.active_doc_label)
-        doc_frame.setFixedHeight(50)  # Устанавливаем фиксированную высоту 50 пикселей
+        # Убираем фиксированную высоту или увеличиваем
+        doc_frame.setMinimumHeight(
+            40
+        )  # Устанавливаем минимальную высоту вместо фиксированной
+        doc_frame.setMaximumHeight(
+            70
+        )  # Устанавливаем минимальную высоту вместо фиксированной
         main_layout.addWidget(doc_frame)
 
         # Разделение на панели
@@ -260,8 +333,8 @@ class KompasApp(QMainWindow):
         right_panel = self.create_right_panel()
         splitter.addWidget(right_panel)
 
-        splitter.setStretchFactor(0, 1)
-        splitter.setStretchFactor(1, 3)
+        splitter.setStretchFactor(0, 3)
+        splitter.setStretchFactor(1, 4)
 
     def create_left_panel(self):
         """Создание левой панели с деревом документов"""
@@ -338,10 +411,22 @@ class KompasApp(QMainWindow):
         self.setStatusBar(self.status_bar)
         self.status_bar.showMessage("Готово")
 
+        # Добавляем визуальные улучшения
+        self.status_bar.setStyleSheet(
+            """
+            QStatusBar::item {
+                border: none;
+            }
+            QLabel {
+                padding: 4px 8px;
+            }
+        """
+        )
+
         self.docs_count_label = QLabel("Документов: 0")
         self.status_bar.addPermanentWidget(self.docs_count_label)
 
-        version_label = QLabel("v1.0.2 (2025)")
+        version_label = QLabel("v1.1.0 (2025)")
         self.status_bar.addPermanentWidget(version_label)
 
     def load_templates(self):
@@ -522,32 +607,9 @@ class KompasApp(QMainWindow):
             QMessageBox.information(self, "Информация о документе", info)
 
     def edit_templates_file(self):
-        """Открытие файла шаблонов во внешнем редакторе"""
-        try:
-            if not os.path.exists(self.templates_file):
-                self.status_bar.showMessage("Файл шаблонов не найден, создаем новый")
-                with open(self.templates_file, "w", encoding="utf-8") as f:
-                    json.dump({"Общие": []}, f, ensure_ascii=False, indent=4)
-
-            os.startfile(self.templates_file)
-            self.status_bar.showMessage(
-                f"Файл шаблонов открыт для редактирования: {self.templates_file}"
-            )
-
-            reply = QMessageBox.question(
-                self,
-                "Обновление шаблонов",
-                "После завершения редактирования файла шаблонов, "
-                "хотите ли вы обновить шаблоны в программе?",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            )
-            if reply == QMessageBox.StandardButton.Yes:
-                QTimer.singleShot(1000, self.reload_templates)
-        except Exception as e:
-            self.status_bar.showMessage(f"Ошибка при открытии файла шаблонов: {str(e)}")
-            QMessageBox.critical(
-                self, "Ошибка", f"Не удалось открыть файл шаблонов: {str(e)}"
-            )
+        """Открытие редактора шаблонов"""
+        dialog = TemplateEditorDialog(self, self.templates_file)
+        dialog.exec()
 
     def reload_templates(self):
         """Перезагрузка шаблонов из файла"""
@@ -585,6 +647,7 @@ class KompasApp(QMainWindow):
         Ctrl+Q - Получить технические требования
         Ctrl+S - Сохранить технические требования
         Ctrl+E - Применить технические требования
+        Ctrl+Shift+S - Сохранить в PDF
         F5 - Обновить шаблоны
         F6 - Обновить список документов
         """
@@ -738,7 +801,7 @@ class KompasApp(QMainWindow):
             self.status_bar.showMessage(f"Вставлен шаблон: {full_text[:30]}...")
 
     def insert_template_variant(self, base_text, variant_text):
-        full_text = f"{base_text} {variant_text}"
+        full_text = f"{base_text}{variant_text}"
         self.current_reqs_text.insertPlainText(full_text + "\n")
         self.status_bar.showMessage(f"Вставлен шаблон: {full_text[:30]}...")
 
@@ -1515,6 +1578,833 @@ class KompasApp(QMainWindow):
         line = re.sub(r"^\s*\d+\.\s*", "", line)
         line = re.sub(r"^\s*[•\-–—]\s*", "", line)
         return line.strip()
+
+    def toggle_theme(self):
+        """Переключение темы с сохранением"""
+        self.dark_mode = not self.dark_mode
+        self.apply_theme()
+        # Сохраняем настройку после переключения
+        self.save_theme_setting()
+        # Обновляем тему для всех открытых дочерних окон
+        for child in self.findChildren(TemplateEditorDialog):
+            child.dark_mode = self.dark_mode
+            child.apply_theme()
+        self.status_bar.showMessage(
+            f"Тема изменена на {'темную' if self.dark_mode else 'светлую'}"
+        )
+
+    def save_to_pdf(self):
+        """Сохранение активного чертежа в PDF с пошаговым логированием"""
+        try:
+            # Проверка подключения к KOMPAS-3D
+            if not hasattr(self, "app7") or not self.app7:
+                self.connect_to_kompas()
+                if not hasattr(self, "app7") or not self.app7:
+                    self.status_bar.showMessage("Не удалось подключиться к KOMPAS-3D")
+                    QMessageBox.critical(
+                        self, "Ошибка", "Не удалось подключиться к KOMPAS-3D"
+                    )
+                    return
+
+            # Проверка активного документа
+            active_doc = self.app7.ActiveDocument
+            if not active_doc:
+                self.status_bar.showMessage("Нет активного документа")
+                QMessageBox.warning(
+                    self, "Ошибка", "Нет активного документа в KOMPAS-3D"
+                )
+                return
+
+            doc_name = active_doc.Name
+
+            # Проверка типа документа (должен быть чертеж)
+            doc_type = active_doc.DocumentType
+            if doc_type != 1:  # 1 - это тип чертежа
+                self.status_bar.showMessage("Активный документ не является чертежом")
+                QMessageBox.warning(
+                    self, "Ошибка", "Активный документ должен быть чертежом"
+                )
+                return
+            # Получение пути к файлу
+            doc_path = active_doc.PathName
+            if not doc_path:
+                self.status_bar.showMessage("Документ не сохранен")
+                QMessageBox.warning(self, "Ошибка", "Сначала сохраните документ")
+                return
+
+            # Формирование пути для PDF
+            doc_dir = os.path.dirname(doc_path)
+            doc_name_without_ext = os.path.splitext(os.path.basename(doc_path))[0]
+            pdf_folder = os.path.join(doc_dir, "Чертежи в pdf")
+
+            pdf_path = os.path.join(pdf_folder, f"{doc_name_without_ext}.pdf")
+            # Получение 2D интерфейса документа
+            try:
+                doc_2d = win32com.client.Dispatch(active_doc, "ksDocument2D")
+            except Exception as e:
+                self.status_bar.showMessage("Ошибка при получении интерфейса документа")
+                QMessageBox.critical(
+                    self, "Ошибка", f"Не удалось получить 2D интерфейс: {str(e)}"
+                )
+                return
+
+            # Сохранение в PDF
+            try:
+                result = doc_2d.SaveAs(pdf_path)
+                if result:
+                    self.status_bar.showMessage(f"Чертеж сохранен в PDF: {pdf_path}")
+                    QMessageBox.information(
+                        self, "Успех", f"Чертеж сохранен в PDF:\n{pdf_path}"
+                    )
+            except Exception as e:
+                self.status_bar.showMessage("Ошибка при сохранении в PDF")
+                QMessageBox.critical(
+                    self, "Ошибка", f"Ошибка сохранения в PDF: {str(e)}"
+                )
+                return
+
+        except Exception as e:
+            error_message = self.handle_kompas_error(e, "сохранения в PDF")
+            self.status_bar.showMessage("Критическая ошибка при сохранении в PDF")
+            QMessageBox.critical(self, "Ошибка", error_message)
+
+
+class TemplateEditorDialog(QDialog):
+    def __init__(self, parent, templates_file):
+        super().__init__(parent)
+        self.setWindowTitle("Редактор шаблонов")
+        self.setGeometry(200, 200, 1200, 700)
+        self.setMinimumSize(800, 600)
+        self.templates_file = templates_file
+        self.templates = parent.templates.copy()
+        self.selected_template = None
+        self.dark_mode = parent.dark_mode  # Синхронизация с родительской темой
+        ThemeManager.apply_theme(self, self.dark_mode)  # Применяем тему
+        self.init_ui()
+
+    def apply_theme(self):
+        """Применение темы для диалога"""
+        ThemeManager.apply_theme(self, self.dark_mode)
+
+    def init_ui(self):
+        layout = QHBoxLayout(self)
+        splitter = QSplitter(Qt.Orientation.Horizontal)
+
+        # Левая часть: дерево шаблонов
+        left_widget = QWidget()
+        left_layout = QVBoxLayout(left_widget)
+        left_label = QLabel("<b>Шаблоны</b>")
+        left_label.setStyleSheet("padding-bottom: 5px;")
+        left_layout.addWidget(left_label)
+        self.template_tree = QTreeWidget()
+        self.template_tree.setHeaderLabels(["Категория", "Текст"])
+        self.template_tree.setColumnWidth(0, 200)
+        self.template_tree.itemClicked.connect(self.load_template_to_editor)
+        left_layout.addWidget(self.template_tree)
+        splitter.addWidget(left_widget)
+
+        # Правая часть: редактор
+        right_widget = QWidget()
+        right_layout = QVBoxLayout(right_widget)
+        right_label = QLabel("<b>Редактирование шаблона</b>")
+        right_label.setStyleSheet("padding-bottom: 5px;")
+        right_layout.addWidget(right_label)
+
+        # Категория
+        category_layout = QHBoxLayout()
+        category_label = QLabel("Категория:")
+        category_label.setFixedWidth(80)
+        category_layout.addWidget(category_label)
+        self.category_combo = QComboBox()
+        self.category_combo.setEditable(True)
+        self.category_combo.addItems(list(self.templates.keys()))
+        category_layout.addWidget(self.category_combo)
+        right_layout.addLayout(category_layout)
+
+        # Текст шаблона
+        template_label = QLabel("Текст шаблона:")
+        template_label.setStyleSheet("padding-top: 5px;")
+        right_layout.addWidget(template_label)
+        self.template_text = QLineEdit()
+        right_layout.addWidget(self.template_text)
+
+        # Варианты
+        variants_group = QGroupBox("Варианты")
+        variants_layout = QVBoxLayout(variants_group)
+        self.variants_table = QTableWidget()
+        self.variants_table.setColumnCount(2)
+        self.variants_table.setHorizontalHeaderLabels(
+            ["Текст", "Пользовательский ввод"]
+        )
+        self.variants_table.horizontalHeader().setSectionResizeMode(
+            0, QHeaderView.ResizeMode.Stretch
+        )
+        self.variants_table.horizontalHeader().setSectionResizeMode(
+            1, QHeaderView.ResizeMode.ResizeToContents
+        )
+        self.variants_table.setEditTriggers(QTableWidget.EditTrigger.DoubleClicked)
+        self.variants_table.itemDoubleClicked.connect(self.toggle_custom_input)
+        variants_layout.addWidget(self.variants_table)
+
+        # Панель управления вариантами
+        variant_controls = QHBoxLayout()
+        self.variant_text = QLineEdit()
+        self.variant_text.setPlaceholderText("Введите вариант")
+        variant_controls.addWidget(self.variant_text)
+        self.custom_input_check = QPushButton("Пользовательский ввод")
+        self.custom_input_check.setCheckable(True)
+        self.custom_input_check.setStyleSheet(
+            """
+            QPushButton:checked {
+                background-color: #409EFF;
+                color: white;
+                border-color: #409EFF;
+            }
+        """
+        )
+        variant_controls.addWidget(self.custom_input_check)
+
+        add_variant_btn = QPushButton("Добавить")
+        add_variant_btn.clicked.connect(self.add_variant)
+        variant_controls.addWidget(add_variant_btn)
+        edit_variant_btn = QPushButton("Изменить")
+        edit_variant_btn.clicked.connect(self.edit_variant)
+        variant_controls.addWidget(edit_variant_btn)
+        delete_variant_btn = QPushButton("Удалить")
+        delete_variant_btn.clicked.connect(self.delete_variant)
+        variant_controls.addWidget(delete_variant_btn)
+        variants_layout.addLayout(variant_controls)
+        right_layout.addWidget(variants_group)
+
+        # Предпросмотр
+        preview_group = QGroupBox("Предпросмотр")
+        preview_layout = QVBoxLayout(preview_group)
+        self.preview_text = QTextEdit()
+        self.preview_text.setReadOnly(True)
+        preview_layout.addWidget(self.preview_text)
+        right_layout.addWidget(preview_group)
+
+        # Кнопки управления с учетом темы
+        buttons_layout = QHBoxLayout()
+        self.add_button = QPushButton("Добавить шаблон")
+        self.add_button.clicked.connect(self.add_template)
+        buttons_layout.addWidget(self.add_button)
+        self.edit_button = QPushButton("Сохранить изменения")
+        self.edit_button.clicked.connect(self.edit_template)
+        buttons_layout.addWidget(self.edit_button)
+        self.delete_button = QPushButton("Удалить шаблон")
+        self.delete_button.clicked.connect(self.delete_template)
+        buttons_layout.addWidget(self.delete_button)
+        self.save_button = QPushButton("Сохранить и закрыть")
+        self.save_button.setObjectName("saveButton")
+        self.save_button.clicked.connect(self.save_and_close)
+        buttons_layout.addWidget(self.save_button)
+        right_layout.addLayout(buttons_layout)
+
+        splitter.addWidget(right_widget)
+        splitter.setStretchFactor(0, 2)
+        splitter.setStretchFactor(2, 3)
+        layout.addWidget(splitter)
+
+        self.populate_tree()
+
+    def populate_tree(self):
+        """Заполнение дерева шаблонов"""
+        self.template_tree.clear()
+        for category, templates in self.templates.items():
+            for template in templates:
+                if isinstance(template, dict):
+                    text = template.get("text", "")
+                    item = QTreeWidgetItem(self.template_tree)
+                    item.setText(0, category)
+                    item.setText(1, text)
+                    item.setData(0, Qt.ItemDataRole.UserRole, (category, template))
+                else:
+                    item = QTreeWidgetItem(self.template_tree)
+                    item.setText(0, category)
+                    item.setText(1, template)
+                    item.setData(
+                        0,
+                        Qt.ItemDataRole.UserRole,
+                        (category, {"text": template, "variants": []}),
+                    )
+
+    def load_template_to_editor(self, item):
+        category, template = item.data(0, Qt.ItemDataRole.UserRole)
+        self.selected_template = (category, template)
+        self.category_combo.setCurrentText(category)
+        self.template_text.setText(template.get("text", ""))
+        self.variants_table.setRowCount(0)
+        variants = template.get("variants", [])
+        for variant in variants:
+            row = self.variants_table.rowCount()
+            self.variants_table.insertRow(row)
+            text = variant.get("text", "") if isinstance(variant, dict) else variant
+            custom = (
+                variant.get("custom_input", False)
+                if isinstance(variant, dict)
+                else False
+            )
+            text_item = QTableWidgetItem(text)
+            text_item.setFlags(
+                text_item.flags() | Qt.ItemFlag.ItemIsEditable
+            )  # Редактируемая
+            self.variants_table.setItem(row, 0, text_item)
+            custom_item = QTableWidgetItem("Да" if custom else "Нет")
+            # Оставляем не редактируемой стандартным способом, переключение через обработчик
+            custom_item.setFlags(custom_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            self.variants_table.setItem(row, 1, custom_item)
+
+    def load_variant_details(self, item):
+        """Загрузка деталей варианта в поля редактирования"""
+        variant = item.data(Qt.ItemDataRole.UserRole)
+        self.variant_text.setText(variant.get("text", ""))
+        self.custom_input_check.setChecked(variant.get("custom_input", False))
+
+    def add_variant(self):
+        """Добавление нового варианта"""
+        text = self.variant_text.text().strip()
+        custom_input = self.custom_input_check.isChecked()
+        if not text:
+            QMessageBox.warning(self, "Ошибка", "Введите текст варианта")
+            return
+        row = self.variants_table.rowCount()
+        self.variants_table.insertRow(row)
+        text_item = QTableWidgetItem(text)
+        text_item.setFlags(
+            text_item.flags() | Qt.ItemFlag.ItemIsEditable
+        )  # Редактируемая
+        self.variants_table.setItem(row, 0, text_item)
+        custom_item = QTableWidgetItem("Да" if custom_input else "Нет")
+        custom_item.setFlags(
+            custom_item.flags() & ~Qt.ItemFlag.ItemIsEditable
+        )  # Не редактируемая
+        self.variants_table.setItem(row, 1, custom_item)
+        self.variant_text.clear()
+
+    def edit_variant(self):
+        """Редактирование выбранного варианта через кнопку 'Изменить'"""
+        selected_row = self.variants_table.currentRow()
+        if selected_row == -1:
+            QMessageBox.warning(self, "Ошибка", "Выберите вариант для изменения")
+            return
+
+        current_text = self.variants_table.item(selected_row, 0).text()
+        current_custom = self.variants_table.item(selected_row, 1).text() == "Да"
+
+        new_text, ok = QInputDialog.getText(
+            self,
+            "Изменить вариант",
+            "Введите новый текст:",
+            QLineEdit.EchoMode.Normal,
+            current_text,
+        )
+        if ok and new_text:
+            text_item = QTableWidgetItem(new_text)
+            text_item.setFlags(text_item.flags() | Qt.ItemFlag.ItemIsEditable)
+            self.variants_table.setItem(selected_row, 0, text_item)
+            custom_item = QTableWidgetItem("Да" if current_custom else "Нет")
+            custom_item.setFlags(custom_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            self.variants_table.setItem(selected_row, 1, custom_item)
+
+    def delete_variant(self):
+        """Удаление выбранного варианта"""
+        selected = self.variants_table.currentRow()
+        if selected == -1:
+            QMessageBox.warning(self, "Ошибка", "Выберите вариант для удаления")
+            return
+        self.variants_table.removeRow(selected)
+
+    def add_template(self):
+        category = self.category_combo.currentText().strip()
+        text = self.template_text.text().strip()
+        if not category or not text:
+            QMessageBox.warning(self, "Ошибка", "Укажите категорию и текст шаблона")
+            return
+
+        # Собираем варианты из таблицы
+        variants = []
+        for row in range(self.variants_table.rowCount()):
+            variant_text = self.variants_table.item(
+                row, 0
+            ).text()  # Исправлено: variant_text вместо text
+            custom_input = self.variants_table.item(row, 1).text() == "Да"
+            variants.append({"text": variant_text, "custom_input": custom_input})
+
+        new_template = {
+            "text": text,
+            "variants": variants,
+        }  # Основной текст сохраняется корректно
+
+        if category not in self.templates:
+            self.templates[category] = []
+        self.templates[category].append(new_template)
+        self.populate_tree()
+        self.clear_editor()
+        self.parent().status_bar.showMessage(f"Добавлен шаблон: {text}")
+
+    def edit_template(self):
+        """Редактирование существующего шаблона"""
+        if not self.selected_template:
+            QMessageBox.warning(self, "Ошибка", "Выберите шаблон для редактирования")
+            return
+
+        old_category, old_template = self.selected_template
+        new_category = self.category_combo.currentText().strip()
+        new_text = self.template_text.text().strip()
+        if not new_category or not new_text:
+            QMessageBox.warning(self, "Ошибка", "Укажите категорию и текст шаблона")
+            return
+
+        # Собираем варианты из таблицы
+        variants = []
+        for row in range(self.variants_table.rowCount()):
+            text = self.variants_table.item(row, 0).text()
+            custom_input = self.variants_table.item(row, 1).text() == "Да"
+            variants.append({"text": text, "custom_input": custom_input})
+
+        new_template = {"text": new_text, "variants": variants}
+
+        # Удаляем старый шаблон
+        self.templates[old_category].remove(old_template)
+        if not self.templates[old_category]:
+            del self.templates[old_category]
+
+        # Добавляем новый
+        if new_category not in self.templates:
+            self.templates[new_category] = []
+        self.templates[new_category].append(new_template)
+
+        self.populate_tree()
+        self.clear_editor()
+        self.selected_template = None
+        self.parent().status_bar.showMessage(f"Шаблон обновлен: {new_text}")
+
+    def delete_template(self):
+        """Удаление шаблона"""
+        if not self.selected_template:
+            QMessageBox.warning(self, "Ошибка", "Выберите шаблон для удаления")
+            return
+
+        category, template = self.selected_template
+        self.templates[category].remove(template)
+        if not self.templates[category]:
+            del self.templates[category]
+        self.populate_tree()
+        self.clear_editor()
+        self.selected_template = None
+        self.parent().status_bar.showMessage(f"Шаблон удален")
+
+    def clear_editor(self):
+        """Очистка полей редактора"""
+        self.template_text.clear()
+        self.variants_table.setRowCount(0)  # Очищаем таблицу
+        self.variant_text.clear()
+        self.custom_input_check.setChecked(False)
+
+    def save_and_close(self):
+        """Сохранение изменений и закрытие"""
+        try:
+            with open(self.templates_file, "w", encoding="utf-8") as f:
+                json.dump(self.templates, f, ensure_ascii=False, indent=4)
+            self.parent().templates = self.templates.copy()
+            self.parent().reload_templates()
+            self.parent().status_bar.showMessage("Шаблоны сохранены")
+            self.accept()
+        except Exception as e:
+            QMessageBox.critical(
+                self, "Ошибка", f"Не удалось сохранить шаблоны: {str(e)}"
+            )
+
+    def update_preview(self):
+        if not self.selected_template:
+            return
+        category, template = self.selected_template
+        text = self.template_text.text()
+        variants = [
+            self.variants_table.item(i, 0).text()
+            for i in range(self.variants_table.rowCount())
+        ]
+        preview = f"{text}\n" + "\n".join([f"  - {v}" for v in variants])
+        self.preview_text.setPlainText(preview)
+
+    def toggle_custom_input(self, item):
+        """Переключение значения 'Да'/'Нет' в колонке 'Пользовательский ввод' по двойному клику"""
+        column = item.column()
+        row = item.row()
+
+        # Обрабатываем только колонку "Пользовательский ввод" (индекс 1)
+        if column == 1:
+            current_value = self.variants_table.item(row, 1).text()
+            new_value = "Нет" if current_value == "Да" else "Да"
+            new_item = QTableWidgetItem(new_value)
+            new_item.setFlags(
+                new_item.flags() & ~Qt.ItemFlag.ItemIsEditable
+            )  # Не редактируемая
+            self.variants_table.setItem(row, 1, new_item)
+            # Обновляем предпросмотр, если нужно
+            self.update_preview()
+
+
+class ThemeManager:
+    DARK_THEME = """
+        QMainWindow, QDialog {
+            background-color: #1F2526;
+        }
+        QWidget {
+            font-size: 12px;
+            letter-spacing: 0.5px;
+        }
+        QGroupBox {
+            font-size: 12px;
+            font-weight: bold;
+            border: 1px solid #303940;
+            border-radius: 5px;
+            margin-top: 10px;
+            padding: 10px;
+            background-color: #2A3033;
+            color: #D3D7DA;
+        }
+        QLabel {
+            color: #D3D7DA;
+        }
+        QLineEdit, QComboBox {
+            padding: 6px;
+            border: 1px solid #303940;
+            border-radius: 4px;
+            background-color: #2A3033;
+            color: #E6ECEF;
+        }
+        QLineEdit:focus, QComboBox:focus {
+            border-width: 2px;
+            border-color: #409EFF;
+        }
+        QPushButton {
+            padding: 8px 16px;
+            border: 1px solid #303940;
+            border-radius: 4px;
+            background-color: #2A3033;
+            color: #E6ECEF;
+        }
+        QPushButton:hover {
+            background-color: #3A4446;
+            border-color: #409EFF;
+            color: #409EFF;
+        }
+        QPushButton:pressed {
+            background-color: #1E2527;
+        }
+        QTextEdit, QTableWidget, QTreeWidget, QListWidget {
+            border: 1px solid #303940;
+            border-radius: 4px;
+            background-color: #2A3033;
+            color: #E6ECEF;
+        }
+        QTabWidget::pane {
+            border: 1px solid #303940;
+            background-color: #2A3033;
+        }
+        QTabBar::tab {
+            padding: 10px 20px;
+            border-bottom: 2px solid transparent;
+            color: #E6ECEF;
+            background-color: #2A3033;
+        }
+        QTabBar::tab:selected {
+            border-bottom: 2px solid #409EFF;
+            color: #409EFF;
+            background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #3A4446, stop:1 #2A3033);
+        }
+        QTreeWidget::item:selected, QListWidget::item:selected, QTableWidget::item:selected {
+            background-color: #3A4446;
+            color: #409EFF;
+        }
+        QToolBar {
+            background-color: #2A3033;
+            border-bottom: 1px solid #303940;
+            padding: 4px;
+        }
+        QToolButton {
+            padding: 6px;
+            margin: 2px;
+            border-radius: 4px;
+            background-color: #2A3033;
+            color: #E6ECEF;
+        }
+        QToolButton:hover {
+            background-color: #3A4446;
+            color: #409EFF;
+        }
+        QStatusBar {
+            background-color: #2A3033;
+            border-top: 1px solid #303940;
+            color: #A6ACAF;
+        }
+        QMenuBar {
+            background-color: #2A3033;
+            color: #E6ECEF;
+        }
+        QMenuBar::item {
+            background-color: #2A3033;
+            color: #E6ECEF;
+            padding: 4px 8px;
+        }
+        QMenuBar::item:selected {
+            background-color: #3A4446;
+            color: #409EFF;
+        }
+        QMenu {
+            background-color: #2A3033;
+            border: 1px solid #303940;
+            color: #E6ECEF;
+        }
+        QMenu::item {
+            padding: 4px 20px;
+            background-color: #2A3033;
+            color: #E6ECEF;
+        }
+        QMenu::item:selected {
+            background-color: #3A4446;
+            color: #409EFF;
+        }
+        QScrollBar:vertical, QScrollBar:horizontal {
+            background-color: #2A3033;
+            width: 14px;
+            height: 14px;
+            margin: 0px;
+            border: 1px solid #303940;
+        }
+        QScrollBar::handle {
+            background-color: #606266;
+            border-radius: 7px;
+        }
+        QScrollBar::handle:hover {
+            background-color: #A6ACAF;
+        }
+        QScrollBar::add-line, QScrollBar::sub-line {
+            background: none;
+            border: none;
+        }
+        QScrollBar::add-page, QScrollBar::sub-page {
+            background-color: #2A3033;
+        }
+        QHeaderView::section {
+            background-color: #252B2D;
+            color: #E6ECEF;
+            padding: 4px;
+            border: 1px solid #303940;
+        }
+        QComboBox::drop-down {
+            border: none;
+            width: 20px;
+        }
+        QComboBox::down-arrow {
+            width: 10px;
+            height: 10px;
+        }
+        QComboBox QAbstractItemView {
+            background-color: #2A3033;
+            border: 1px solid #303940;
+            color: #E6ECEF;
+            selection-background-color: #3A4446;
+            selection-color: #409EFF;
+        }
+        QSplitter::handle {
+            background-color: #303940;
+            width: 4px;
+            height: 4px;
+        }
+        QSplitter::handle:hover {
+            background-color: #409EFF;
+        }
+        QSplitter::handle:pressed {
+            background-color: #1E2527;
+        }
+    """
+
+    LIGHT_THEME = """
+        QMainWindow, QDialog {
+            background-color: #F5F6FA;
+        }
+        QWidget {
+            font-size: 12px;
+            letter-spacing: 0.5px;
+        }
+        QGroupBox {
+            font-size: 12px;
+            font-weight: bold;
+            border: 1px solid #DCDFE6;
+            border-radius: 5px;
+            margin-top: 10px;
+            padding: 10px;
+            background-color: #FFFFFF;
+            color: #212529;
+        }
+        QLabel {
+            color: #212529;
+        }
+        QLineEdit, QComboBox {
+            padding: 6px;
+            border: 1px solid #DCDFE6;
+            border-radius: 4px;
+            background-color: #FFFFFF;
+            color: #303133;
+        }
+        QLineEdit:focus, QComboBox:focus {
+            border-width: 2px;
+            border-color: #409EFF;
+        }
+        QPushButton {
+            padding: 8px 16px;
+            border: 1px solid #DCDFE6;
+            border-radius: 4px;
+            background-color: #FFFFFF;
+            color: #606266;
+        }
+        QPushButton:hover {
+            background-color: #ECF5FF;
+            border-color: #409EFF;
+            color: #409EFF;
+        }
+        QPushButton:pressed {
+            background-color: #D6EBFF;
+        }
+        QTextEdit, QTableWidget, QTreeWidget, QListWidget {
+            border: 1px solid #DCDFE6;
+            border-radius: 4px;
+            background-color: #FFFFFF;
+            color: #303133;
+        }
+        QTabWidget::pane {
+            border: 1px solid #DCDFE6;
+            background-color: #FFFFFF;
+        }
+        QTabBar::tab {
+            padding: 10px 20px;
+            border-bottom: 2px solid transparent;
+            color: #606266;
+            background-color: #FFFFFF;
+        }
+        QTabBar::tab:selected {
+            border-bottom: 2px solid #409EFF;
+            color: #409EFF;
+            background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #ECF5FF, stop:1 #FFFFFF);
+        }
+        QTreeWidget::item:selected, QListWidget::item:selected, QTableWidget::item:selected {
+            background-color: #E6F7FF;
+            color: #409EFF;
+        }
+        QToolBar {
+            background-color: #FFFFFF;
+            border-bottom: 1px solid #DCDFE6;
+            padding: 4px;
+        }
+        QToolButton {
+            padding: 6px;
+            margin: 2px;
+            border-radius: 4px;
+            background-color: #FFFFFF;
+            color: #606266;
+        }
+        QToolButton:hover {
+            background-color: #ECF5FF;
+            color: #409EFF;
+        }
+        QStatusBar {
+            background-color: #FFFFFF;
+            border-top: 1px solid #DCDFE6;
+            color: #606266;
+        }
+        QMenuBar {
+            background-color: #FFFFFF;
+            color: #303133;
+        }
+        QMenuBar::item {
+            background-color: #FFFFFF;
+            color: #303133;
+            padding: 4px 8px;
+        }
+        QMenuBar::item:selected {
+            background-color: #ECF5FF;
+            color: #409EFF;
+        }
+        QMenu {
+            background-color: #FFFFFF;
+            border: 1px solid #DCDFE6;
+            color: #303133;
+        }
+        QMenu::item {
+            padding: 4px 20px;
+            background-color: #FFFFFF;
+            color: #303133;
+        }
+        QMenu::item:selected {
+            background-color: #ECF5FF;
+            color: #409EFF;
+        }
+        QScrollBar:vertical, QScrollBar:horizontal {
+            background-color: #FFFFFF;
+            width: 14px;
+            height: 14px;
+            margin: 0px;
+            border: 1px solid #DCDFE6;
+        }
+        QScrollBar::handle {
+            background-color: #C0C4CC;
+            border-radius: 7px;
+        }
+        QScrollBar::handle:hover {
+            background: #A6ACAF;
+        }
+        QScrollBar::add-line, QScrollBar::sub-line {
+            background: none;
+            border: none;
+        }
+        QScrollBar::add-page, QScrollBar::sub-page {
+            background-color: #FFFFFF;
+        }
+        QHeaderView::section {
+            background-color: #F5F6FA;
+            color: #303133;
+            padding: 4px;
+            border: 1px solid #DCDFE6;
+        }
+        QComboBox::drop-down {
+            border: none;
+            width: 20px;
+        }
+        QComboBox::down-arrow {
+            width: 10px;
+            height: 10px;
+        }
+        QComboBox QAbstractItemView {
+            background-color: #FFFFFF;
+            border: 1px solid #DCDFE6;
+            color: #303133;
+            selection-background-color: #ECF5FF;
+            selection-color: #409EFF;
+        }
+        QSplitter::handle {
+            background-color: #DCDFE6;
+            width: 4px;
+            height: 4px;
+            border-radius: 3px
+        }
+        QSplitter::handle:hover {
+            background-color: #409EFF;
+        }
+        QSplitter::handle:pressed {
+            background-color: #D6EBFF;
+        }
+    """
+
+    @staticmethod
+    def apply_theme(widget, dark_mode):
+        """Применение темы к виджету"""
+        if dark_mode:
+            widget.setStyleSheet(ThemeManager.DARK_THEME)
+        else:
+            widget.setStyleSheet(ThemeManager.LIGHT_THEME)
 
 
 if __name__ == "__main__":
