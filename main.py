@@ -89,7 +89,7 @@ class KompasApp(QMainWindow):
         # Периодическое обновление информации о документах
         self.timer = QTimer()
         self.timer.timeout.connect(self.periodic_update)
-        self.timer.start(1000)
+        self.timer.start(2000)
 
     def create_ui(self):
         """Создание пользовательского интерфейса"""
@@ -1126,7 +1126,7 @@ class KompasApp(QMainWindow):
     def periodic_update(self):
         """Периодическое обновление информации о документах"""
         try:
-            if self.is_kompas_running():
+            if self.isActiveWindow() and self.is_kompas_running():
                 self.update_active_document_info()
             else:
                 self.connect_status.setText("🔴 Нет подключения")
@@ -1509,9 +1509,10 @@ class TemplateEditorDialog(QDialog):
     def __init__(self, parent, templates_file):
         super().__init__(parent)
         self.setWindowTitle("Редактор шаблонов")
-        self.setGeometry(200, 200, 600, 400)
+        self.setGeometry(200, 200, 800, 500)
         self.templates_file = templates_file
-        self.templates = parent.templates.copy()  # Копия текущих шаблонов
+        self.templates = parent.templates.copy()
+        self.selected_template = None  # Для отслеживания текущего шаблона
         self.init_ui()
 
     def init_ui(self):
@@ -1542,21 +1543,42 @@ class TemplateEditorDialog(QDialog):
         editor_layout.addWidget(self.template_text)
 
         # Варианты
-        editor_layout.addWidget(QLabel("Варианты (через запятую):"))
-        self.variants_text = QTextEdit()
-        self.variants_text.setMaximumHeight(100)
-        editor_layout.addWidget(self.variants_text)
+        variants_layout = QVBoxLayout()
+        variants_layout.addWidget(QLabel("Варианты:"))
+        self.variants_list = QListWidget()
+        self.variants_list.itemClicked.connect(self.load_variant_details)
+        variants_layout.addWidget(self.variants_list)
 
-        # Флаг пользовательского ввода
+        # Панель управления вариантами
+        variant_controls = QHBoxLayout()
+        self.variant_text = QLineEdit()
+        self.variant_text.setPlaceholderText("Введите вариант")
+        variant_controls.addWidget(self.variant_text)
+
         self.custom_input_check = QPushButton("Пользовательский ввод")
         self.custom_input_check.setCheckable(True)
-        editor_layout.addWidget(self.custom_input_check)
+        variant_controls.addWidget(self.custom_input_check)
+
+        add_variant_btn = QPushButton("Добавить вариант")
+        add_variant_btn.clicked.connect(self.add_variant)
+        variant_controls.addWidget(add_variant_btn)
+
+        edit_variant_btn = QPushButton("Изменить вариант")
+        edit_variant_btn.clicked.connect(self.edit_variant)
+        variant_controls.addWidget(edit_variant_btn)
+
+        delete_variant_btn = QPushButton("Удалить вариант")
+        delete_variant_btn.clicked.connect(self.delete_variant)
+        variant_controls.addWidget(delete_variant_btn)
+
+        variants_layout.addLayout(variant_controls)
+        editor_layout.addLayout(variants_layout)
 
         layout.addLayout(editor_layout)
 
-        # Кнопки управления
+        # Кнопки управления шаблонами
         buttons_layout = QHBoxLayout()
-        self.add_button = QPushButton("Добавить")
+        self.add_button = QPushButton("Добавить шаблон")
         self.add_button.clicked.connect(self.add_template)
         buttons_layout.addWidget(self.add_button)
 
@@ -1564,7 +1586,7 @@ class TemplateEditorDialog(QDialog):
         self.edit_button.clicked.connect(self.edit_template)
         buttons_layout.addWidget(self.edit_button)
 
-        self.delete_button = QPushButton("Удалить")
+        self.delete_button = QPushButton("Удалить шаблон")
         self.delete_button.clicked.connect(self.delete_template)
         buttons_layout.addWidget(self.delete_button)
 
@@ -1600,43 +1622,83 @@ class TemplateEditorDialog(QDialog):
     def load_template_to_editor(self, item):
         """Загрузка выбранного шаблона в редактор"""
         category, template = item.data(0, Qt.ItemDataRole.UserRole)
+        self.selected_template = (category, template)
         self.category_combo.setCurrentText(category)
         self.template_text.setText(template.get("text", ""))
+        self.variants_list.clear()
         variants = template.get("variants", [])
-        self.variants_text.setPlainText(
-            ", ".join(
-                [v.get("text", v) if isinstance(v, dict) else v for v in variants]
-            )
-        )
-        self.custom_input_check.setChecked(
-            any(v.get("custom_input", False) for v in variants if isinstance(v, dict))
-        )
+        for variant in variants:
+            if isinstance(variant, dict):
+                text = variant.get("text", "")
+                custom = variant.get("custom_input", False)
+                item = QListWidgetItem(f"{text} {'(ввод)' if custom else ''}")
+                item.setData(Qt.ItemDataRole.UserRole, variant)
+                self.variants_list.addItem(item)
+            else:
+                item = QListWidgetItem(variant)
+                item.setData(
+                    Qt.ItemDataRole.UserRole, {"text": variant, "custom_input": False}
+                )
+                self.variants_list.addItem(item)
+
+    def load_variant_details(self, item):
+        """Загрузка деталей варианта в поля редактирования"""
+        variant = item.data(Qt.ItemDataRole.UserRole)
+        self.variant_text.setText(variant.get("text", ""))
+        self.custom_input_check.setChecked(variant.get("custom_input", False))
+
+    def add_variant(self):
+        """Добавление нового варианта"""
+        text = self.variant_text.text().strip()
+        custom_input = self.custom_input_check.isChecked()
+        if not text:
+            QMessageBox.warning(self, "Ошибка", "Введите текст варианта")
+            return
+        variant = {"text": text, "custom_input": custom_input}
+        item = QListWidgetItem(f"{text} {'(ввод)' if custom_input else ''}")
+        item.setData(Qt.ItemDataRole.UserRole, variant)
+        self.variants_list.addItem(item)
+        self.variant_text.clear()
+
+    def edit_variant(self):
+        """Изменение выбранного варианта"""
+        selected = self.variants_list.currentItem()
+        if not selected:
+            QMessageBox.warning(self, "Ошибка", "Выберите вариант для изменения")
+            return
+        text = self.variant_text.text().strip()
+        custom_input = self.custom_input_check.isChecked()
+        if not text:
+            QMessageBox.warning(self, "Ошибка", "Введите текст варианта")
+            return
+        variant = {"text": text, "custom_input": custom_input}
+        selected.setText(f"{text} {'(ввод)' if custom_input else ''}")
+        selected.setData(Qt.ItemDataRole.UserRole, variant)
+
+    def delete_variant(self):
+        """Удаление выбранного варианта"""
+        selected = self.variants_list.currentItem()
+        if not selected:
+            QMessageBox.warning(self, "Ошибка", "Выберите вариант для удаления")
+            return
+        self.variants_list.takeItem(self.variants_list.row(selected))
 
     def add_template(self):
         """Добавление нового шаблона"""
         category = self.category_combo.currentText().strip()
         text = self.template_text.text().strip()
-        variants_text = self.variants_text.toPlainText().strip()
-        custom_input = self.custom_input_check.isChecked()
-
         if not category or not text:
             QMessageBox.warning(self, "Ошибка", "Укажите категорию и текст шаблона")
             return
 
+        variants = [
+            self.variants_list.item(i).data(Qt.ItemDataRole.UserRole)
+            for i in range(self.variants_list.count())
+        ]
+        new_template = {"text": text, "variants": variants}
+
         if category not in self.templates:
             self.templates[category] = []
-
-        variants = []
-        if variants_text:
-            for variant in variants_text.split(","):
-                variant = variant.strip()
-                if variant:
-                    if custom_input:
-                        variants.append({"text": variant, "custom_input": True})
-                    else:
-                        variants.append(variant)
-
-        new_template = {"text": text, "variants": variants}
         self.templates[category].append(new_template)
         self.populate_tree()
         self.clear_editor()
@@ -1644,31 +1706,21 @@ class TemplateEditorDialog(QDialog):
 
     def edit_template(self):
         """Редактирование существующего шаблона"""
-        selected = self.template_tree.currentItem()
-        if not selected:
+        if not self.selected_template:
             QMessageBox.warning(self, "Ошибка", "Выберите шаблон для редактирования")
             return
 
-        old_category, old_template = selected.data(0, Qt.ItemDataRole.UserRole)
+        old_category, old_template = self.selected_template
         new_category = self.category_combo.currentText().strip()
         new_text = self.template_text.text().strip()
-        variants_text = self.variants_text.toPlainText().strip()
-        custom_input = self.custom_input_check.isChecked()
-
         if not new_category or not new_text:
             QMessageBox.warning(self, "Ошибка", "Укажите категорию и текст шаблона")
             return
 
-        variants = []
-        if variants_text:
-            for variant in variants_text.split(","):
-                variant = variant.strip()
-                if variant:
-                    if custom_input:
-                        variants.append({"text": variant, "custom_input": True})
-                    else:
-                        variants.append(variant)
-
+        variants = [
+            self.variants_list.item(i).data(Qt.ItemDataRole.UserRole)
+            for i in range(self.variants_list.count())
+        ]
         new_template = {"text": new_text, "variants": variants}
 
         # Удаляем старый шаблон
@@ -1676,34 +1728,36 @@ class TemplateEditorDialog(QDialog):
         if not self.templates[old_category]:
             del self.templates[old_category]
 
-        # Добавляем новый шаблон
+        # Добавляем новый
         if new_category not in self.templates:
             self.templates[new_category] = []
         self.templates[new_category].append(new_template)
 
         self.populate_tree()
         self.clear_editor()
+        self.selected_template = None
         self.parent().status_bar.showMessage(f"Шаблон обновлен: {new_text}")
 
     def delete_template(self):
         """Удаление шаблона"""
-        selected = self.template_tree.currentItem()
-        if not selected:
+        if not self.selected_template:
             QMessageBox.warning(self, "Ошибка", "Выберите шаблон для удаления")
             return
 
-        category, template = selected.data(0, Qt.ItemDataRole.UserRole)
+        category, template = self.selected_template
         self.templates[category].remove(template)
         if not self.templates[category]:
             del self.templates[category]
         self.populate_tree()
         self.clear_editor()
+        self.selected_template = None
         self.parent().status_bar.showMessage(f"Шаблон удален")
 
     def clear_editor(self):
         """Очистка полей редактора"""
         self.template_text.clear()
-        self.variants_text.clear()
+        self.variants_list.clear()
+        self.variant_text.clear()
         self.custom_input_check.setChecked(False)
 
     def save_and_close(self):
