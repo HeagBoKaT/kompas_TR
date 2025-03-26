@@ -26,6 +26,17 @@ from PyQt6.QtWidgets import (
     QMessageBox,
     QInputDialog,
     QScrollBar,
+    QDialog,
+    QVBoxLayout,
+    QHBoxLayout,
+    QPushButton,
+    QTreeWidget,
+    QTreeWidgetItem,
+    QLineEdit,
+    QComboBox,
+    QTextEdit,
+    QLabel,
+    QMessageBox,
 )
 
 from PyQt6.QtGui import QIcon, QFont, QTextCharFormat, QTextCursor, QAction
@@ -522,32 +533,9 @@ class KompasApp(QMainWindow):
             QMessageBox.information(self, "Информация о документе", info)
 
     def edit_templates_file(self):
-        """Открытие файла шаблонов во внешнем редакторе"""
-        try:
-            if not os.path.exists(self.templates_file):
-                self.status_bar.showMessage("Файл шаблонов не найден, создаем новый")
-                with open(self.templates_file, "w", encoding="utf-8") as f:
-                    json.dump({"Общие": []}, f, ensure_ascii=False, indent=4)
-
-            os.startfile(self.templates_file)
-            self.status_bar.showMessage(
-                f"Файл шаблонов открыт для редактирования: {self.templates_file}"
-            )
-
-            reply = QMessageBox.question(
-                self,
-                "Обновление шаблонов",
-                "После завершения редактирования файла шаблонов, "
-                "хотите ли вы обновить шаблоны в программе?",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            )
-            if reply == QMessageBox.StandardButton.Yes:
-                QTimer.singleShot(1000, self.reload_templates)
-        except Exception as e:
-            self.status_bar.showMessage(f"Ошибка при открытии файла шаблонов: {str(e)}")
-            QMessageBox.critical(
-                self, "Ошибка", f"Не удалось открыть файл шаблонов: {str(e)}"
-            )
+        """Открытие редактора шаблонов"""
+        dialog = TemplateEditorDialog(self, self.templates_file)
+        dialog.exec()
 
     def reload_templates(self):
         """Перезагрузка шаблонов из файла"""
@@ -1515,6 +1503,222 @@ class KompasApp(QMainWindow):
         line = re.sub(r"^\s*\d+\.\s*", "", line)
         line = re.sub(r"^\s*[•\-–—]\s*", "", line)
         return line.strip()
+
+
+class TemplateEditorDialog(QDialog):
+    def __init__(self, parent, templates_file):
+        super().__init__(parent)
+        self.setWindowTitle("Редактор шаблонов")
+        self.setGeometry(200, 200, 600, 400)
+        self.templates_file = templates_file
+        self.templates = parent.templates.copy()  # Копия текущих шаблонов
+        self.init_ui()
+
+    def init_ui(self):
+        layout = QVBoxLayout(self)
+
+        # Дерево шаблонов
+        self.template_tree = QTreeWidget()
+        self.template_tree.setHeaderLabels(["Категория", "Текст"])
+        self.template_tree.setColumnWidth(0, 150)
+        self.template_tree.itemClicked.connect(self.load_template_to_editor)
+        layout.addWidget(self.template_tree)
+
+        # Панель редактирования
+        editor_layout = QVBoxLayout()
+
+        # Категория
+        category_layout = QHBoxLayout()
+        category_layout.addWidget(QLabel("Категория:"))
+        self.category_combo = QComboBox()
+        self.category_combo.setEditable(True)
+        self.category_combo.addItems(list(self.templates.keys()))
+        category_layout.addWidget(self.category_combo)
+        editor_layout.addLayout(category_layout)
+
+        # Текст шаблона
+        editor_layout.addWidget(QLabel("Текст шаблона:"))
+        self.template_text = QLineEdit()
+        editor_layout.addWidget(self.template_text)
+
+        # Варианты
+        editor_layout.addWidget(QLabel("Варианты (через запятую):"))
+        self.variants_text = QTextEdit()
+        self.variants_text.setMaximumHeight(100)
+        editor_layout.addWidget(self.variants_text)
+
+        # Флаг пользовательского ввода
+        self.custom_input_check = QPushButton("Пользовательский ввод")
+        self.custom_input_check.setCheckable(True)
+        editor_layout.addWidget(self.custom_input_check)
+
+        layout.addLayout(editor_layout)
+
+        # Кнопки управления
+        buttons_layout = QHBoxLayout()
+        self.add_button = QPushButton("Добавить")
+        self.add_button.clicked.connect(self.add_template)
+        buttons_layout.addWidget(self.add_button)
+
+        self.edit_button = QPushButton("Сохранить изменения")
+        self.edit_button.clicked.connect(self.edit_template)
+        buttons_layout.addWidget(self.edit_button)
+
+        self.delete_button = QPushButton("Удалить")
+        self.delete_button.clicked.connect(self.delete_template)
+        buttons_layout.addWidget(self.delete_button)
+
+        self.save_button = QPushButton("Сохранить и закрыть")
+        self.save_button.clicked.connect(self.save_and_close)
+        buttons_layout.addWidget(self.save_button)
+
+        layout.addLayout(buttons_layout)
+
+        self.populate_tree()
+
+    def populate_tree(self):
+        """Заполнение дерева шаблонов"""
+        self.template_tree.clear()
+        for category, templates in self.templates.items():
+            for template in templates:
+                if isinstance(template, dict):
+                    text = template.get("text", "")
+                    item = QTreeWidgetItem(self.template_tree)
+                    item.setText(0, category)
+                    item.setText(1, text)
+                    item.setData(0, Qt.ItemDataRole.UserRole, (category, template))
+                else:
+                    item = QTreeWidgetItem(self.template_tree)
+                    item.setText(0, category)
+                    item.setText(1, template)
+                    item.setData(
+                        0,
+                        Qt.ItemDataRole.UserRole,
+                        (category, {"text": template, "variants": []}),
+                    )
+
+    def load_template_to_editor(self, item):
+        """Загрузка выбранного шаблона в редактор"""
+        category, template = item.data(0, Qt.ItemDataRole.UserRole)
+        self.category_combo.setCurrentText(category)
+        self.template_text.setText(template.get("text", ""))
+        variants = template.get("variants", [])
+        self.variants_text.setPlainText(
+            ", ".join(
+                [v.get("text", v) if isinstance(v, dict) else v for v in variants]
+            )
+        )
+        self.custom_input_check.setChecked(
+            any(v.get("custom_input", False) for v in variants if isinstance(v, dict))
+        )
+
+    def add_template(self):
+        """Добавление нового шаблона"""
+        category = self.category_combo.currentText().strip()
+        text = self.template_text.text().strip()
+        variants_text = self.variants_text.toPlainText().strip()
+        custom_input = self.custom_input_check.isChecked()
+
+        if not category or not text:
+            QMessageBox.warning(self, "Ошибка", "Укажите категорию и текст шаблона")
+            return
+
+        if category not in self.templates:
+            self.templates[category] = []
+
+        variants = []
+        if variants_text:
+            for variant in variants_text.split(","):
+                variant = variant.strip()
+                if variant:
+                    if custom_input:
+                        variants.append({"text": variant, "custom_input": True})
+                    else:
+                        variants.append(variant)
+
+        new_template = {"text": text, "variants": variants}
+        self.templates[category].append(new_template)
+        self.populate_tree()
+        self.clear_editor()
+        self.parent().status_bar.showMessage(f"Добавлен шаблон: {text}")
+
+    def edit_template(self):
+        """Редактирование существующего шаблона"""
+        selected = self.template_tree.currentItem()
+        if not selected:
+            QMessageBox.warning(self, "Ошибка", "Выберите шаблон для редактирования")
+            return
+
+        old_category, old_template = selected.data(0, Qt.ItemDataRole.UserRole)
+        new_category = self.category_combo.currentText().strip()
+        new_text = self.template_text.text().strip()
+        variants_text = self.variants_text.toPlainText().strip()
+        custom_input = self.custom_input_check.isChecked()
+
+        if not new_category or not new_text:
+            QMessageBox.warning(self, "Ошибка", "Укажите категорию и текст шаблона")
+            return
+
+        variants = []
+        if variants_text:
+            for variant in variants_text.split(","):
+                variant = variant.strip()
+                if variant:
+                    if custom_input:
+                        variants.append({"text": variant, "custom_input": True})
+                    else:
+                        variants.append(variant)
+
+        new_template = {"text": new_text, "variants": variants}
+
+        # Удаляем старый шаблон
+        self.templates[old_category].remove(old_template)
+        if not self.templates[old_category]:
+            del self.templates[old_category]
+
+        # Добавляем новый шаблон
+        if new_category not in self.templates:
+            self.templates[new_category] = []
+        self.templates[new_category].append(new_template)
+
+        self.populate_tree()
+        self.clear_editor()
+        self.parent().status_bar.showMessage(f"Шаблон обновлен: {new_text}")
+
+    def delete_template(self):
+        """Удаление шаблона"""
+        selected = self.template_tree.currentItem()
+        if not selected:
+            QMessageBox.warning(self, "Ошибка", "Выберите шаблон для удаления")
+            return
+
+        category, template = selected.data(0, Qt.ItemDataRole.UserRole)
+        self.templates[category].remove(template)
+        if not self.templates[category]:
+            del self.templates[category]
+        self.populate_tree()
+        self.clear_editor()
+        self.parent().status_bar.showMessage(f"Шаблон удален")
+
+    def clear_editor(self):
+        """Очистка полей редактора"""
+        self.template_text.clear()
+        self.variants_text.clear()
+        self.custom_input_check.setChecked(False)
+
+    def save_and_close(self):
+        """Сохранение изменений и закрытие"""
+        try:
+            with open(self.templates_file, "w", encoding="utf-8") as f:
+                json.dump(self.templates, f, ensure_ascii=False, indent=4)
+            self.parent().templates = self.templates.copy()
+            self.parent().reload_templates()
+            self.parent().status_bar.showMessage("Шаблоны сохранены")
+            self.accept()
+        except Exception as e:
+            QMessageBox.critical(
+                self, "Ошибка", f"Не удалось сохранить шаблоны: {str(e)}"
+            )
 
 
 if __name__ == "__main__":
