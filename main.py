@@ -286,6 +286,12 @@ class KompasApp(QMainWindow):
         save_pdf_btn.triggered.connect(self.save_to_pdf)
         toolbar.addAction(save_pdf_btn)
 
+        # Новая кнопка для сохранения всех чертежей в PDF
+        save_all_pdf_btn = QAction("📚", self)
+        save_all_pdf_btn.setToolTip("Сохранить все чертежи в PDF")
+        save_all_pdf_btn.triggered.connect(self.save_all_drawings_to_pdf)
+        toolbar.addAction(save_all_pdf_btn)
+
         toolbar.addSeparator()
 
         # Кнопка редактирования шаблонов
@@ -433,7 +439,7 @@ class KompasApp(QMainWindow):
         self.docs_count_label = QLabel("Документов: 0")
         self.status_bar.addPermanentWidget(self.docs_count_label)
 
-        version_label = QLabel("v1.1.2 (2025)")
+        version_label = QLabel("v1.1.3 (2025)")
         self.status_bar.addPermanentWidget(version_label)
 
     def load_templates(self):
@@ -1675,6 +1681,101 @@ class KompasApp(QMainWindow):
     def reset_status_style(self):
         """Возврат к стандартному стилю статус-бара"""
         self.status_bar.setStyleSheet(self.default_status_style)
+
+    def save_all_drawings_to_pdf(self):
+        """Сохранение всех открытых чертежей в PDF с активацией каждого документа"""
+        try:
+            if not hasattr(self, "app7") or not self.app7:
+                self.connect_to_kompas()
+                if not hasattr(self, "app7") or not self.app7:
+                    self.set_status_message(
+                        "Не удалось подключиться к KOMPAS-3D", False
+                    )
+                    return
+
+            documents = self.app7.Documents
+            if documents.Count == 0:
+                self.set_status_message("Нет открытых документов", False)
+                return
+
+            saved_count = 0
+            drawing_count = 0
+            original_active_doc = (
+                self.app7.ActiveDocument
+            )  # Сохраняем текущий активный документ
+
+            # Сначала собираем все чертежи в список
+            drawings = []
+            for i in range(documents.Count):
+                doc = documents.Item(i)
+                if doc.DocumentType == 1:  # 1 - это тип чертежа
+                    drawings.append(doc)
+                    drawing_count += 1
+
+            if drawing_count == 0:
+                self.set_status_message("Нет открытых чертежей для сохранения", False)
+                return
+
+            # Перебираем чертежи и сохраняем их
+            for doc in drawings:
+                doc_path = doc.PathName
+                if not doc_path:
+                    self.set_status_message(
+                        f"Документ '{doc.Name}' не сохранен, пропускается", False
+                    )
+                    continue
+
+                # Активируем документ
+                try:
+                    doc.Active = True
+                    # Даем небольшую паузу для завершения активации
+                    QTimer.singleShot(100, lambda: None)  # Минимальная задержка
+
+                    doc_dir = os.path.dirname(doc_path)
+                    doc_name_without_ext = os.path.splitext(os.path.basename(doc_path))[
+                        0
+                    ]
+                    pdf_folder = os.path.join(doc_dir, "Чертежи в pdf")
+                    if not os.path.exists(pdf_folder):
+                        os.makedirs(pdf_folder)
+
+                    pdf_path = os.path.join(pdf_folder, f"{doc_name_without_ext}.pdf")
+
+                    # Сохранение в PDF
+                    doc_2d = win32com.client.Dispatch(doc, "ksDocument2D")
+                    result = doc_2d.SaveAs(pdf_path)
+                    if result or result is None:
+                        saved_count += 1
+                        self.set_status_message(f"Сохранен чертеж: {doc.Name}", True)
+                    else:
+                        self.set_status_message(
+                            f"Не удалось сохранить {doc.Name} в PDF", False
+                        )
+                except Exception as e:
+                    self.set_status_message(
+                        f"Ошибка сохранения {doc.Name}: {str(e)}", False
+                    )
+                    continue
+
+            # Восстанавливаем исходный активный документ
+            if original_active_doc:
+                try:
+                    original_active_doc.Active = True
+                except:
+                    pass
+
+            self.set_status_message(
+                f"Сохранено {saved_count} из {drawing_count} чертежей в PDF",
+                saved_count > 0,
+            )
+
+        except Exception as e:
+            error_message = self.handle_kompas_error(
+                e, "сохранения всех чертежей в PDF"
+            )
+            self.set_status_message(
+                "Критическая ошибка при сохранении всех чертежей", False
+            )
 
 
 class TemplateEditorDialog(QDialog):
