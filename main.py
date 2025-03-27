@@ -66,6 +66,9 @@ class KompasApp(QMainWindow):
         self.dark_mode = self.load_theme_setting()
 
         self.status_bar = self.statusBar()
+        self.default_status_style = self.status_bar.styleSheet()
+        # Устанавливаем начальное сообщение с длительностью 5000 мс (5 секунд)
+        self.status_bar.showMessage("Приложение запущено", 2000)
         self.status_bar.showMessage("Приложение запущено")
         self.setWindowTitle("Редактор технических требований KOMPAS-3D")
         self.setGeometry(100, 100, 1400, 900)
@@ -94,7 +97,7 @@ class KompasApp(QMainWindow):
 
         self.update_active_document_info()
         self.update_documents_tree()
-
+        self.last_doc_count = 0
         self.timer = QTimer()
         self.timer.timeout.connect(self.periodic_update)
         self.timer.start(1000)
@@ -166,7 +169,7 @@ class KompasApp(QMainWindow):
         get_req_action.triggered.connect(self.get_technical_requirements)
         file_menu.addAction(get_req_action)
 
-        save_req_action = QAction("Сохранить технические требования", self)
+        save_req_action = QAction("Сохранить документ требования", self)
         save_req_action.setShortcut("Ctrl+S")
         save_req_action.triggered.connect(self.save_technical_requirements)
         file_menu.addAction(save_req_action)
@@ -267,7 +270,7 @@ class KompasApp(QMainWindow):
 
         # Кнопка сохранения тех. требований
         save_btn = QAction("💾", self)
-        save_btn.setToolTip("Сохранить технические требования (Ctrl+S)")
+        save_btn.setToolTip("Сохранить документ требования (Ctrl+S)")
         save_btn.triggered.connect(self.save_technical_requirements)
         toolbar.addAction(save_btn)
 
@@ -282,6 +285,12 @@ class KompasApp(QMainWindow):
         save_pdf_btn.setToolTip("Сохранить в PDF (Ctrl+Shift+S)")
         save_pdf_btn.triggered.connect(self.save_to_pdf)
         toolbar.addAction(save_pdf_btn)
+
+        # Новая кнопка для сохранения всех чертежей в PDF
+        save_all_pdf_btn = QAction("📚", self)
+        save_all_pdf_btn.setToolTip("Сохранить все чертежи в PDF")
+        save_all_pdf_btn.triggered.connect(self.save_all_drawings_to_pdf)
+        toolbar.addAction(save_all_pdf_btn)
 
         toolbar.addSeparator()
 
@@ -365,8 +374,112 @@ class KompasApp(QMainWindow):
         self.doc_tree.setColumnWidth(2, 300)
         self.doc_tree.itemDoubleClicked.connect(self.on_document_double_click)
         left_layout.addWidget(self.doc_tree)
+        # Добавляем поддержку контекстного меню
+        self.doc_tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.doc_tree.customContextMenuRequested.connect(
+            self.show_document_context_menu
+        )
+        left_layout.addWidget(self.doc_tree)
 
         return left_panel
+
+    def show_document_context_menu(self, pos):
+        """Показ контекстного меню для документа в дереве"""
+        item = self.doc_tree.itemAt(pos)
+        if not item:
+            return
+
+        doc_name = item.text(0)
+        doc_path = item.text(2)
+
+        menu = QMenu(self)
+
+        # Действие "Открыть папку"
+        open_folder_action = QAction("Открыть папку", self)
+        open_folder_action.triggered.connect(
+            lambda: self.open_document_folder(doc_path)
+        )
+        menu.addAction(open_folder_action)
+
+        # Действие "Закрыть документ"
+        close_doc_action = QAction("Закрыть документ", self)
+        close_doc_action.triggered.connect(lambda: self.close_document(doc_name))
+        menu.addAction(close_doc_action)
+
+        # Показываем меню в позиции курсора
+        menu.exec(self.doc_tree.mapToGlobal(pos))
+
+    def open_document_folder(self, doc_path):
+        """Открытие папки с документом в проводнике"""
+        try:
+            if doc_path == "Документ не сохранен":
+                self.status_bar.showMessage("Документ не сохранен, папка недоступна")
+                QMessageBox.warning(
+                    self, "Ошибка", "Документ еще не сохранен на диске."
+                )
+                return
+
+            folder_path = os.path.dirname(doc_path)
+            if os.path.exists(folder_path):
+                os.startfile(
+                    folder_path
+                )  # Для Windows; для других ОС потребуется адаптация
+                self.status_bar.showMessage(f"Открыта папка: {folder_path}")
+            else:
+                self.status_bar.showMessage("Папка не найдена")
+                QMessageBox.warning(self, "Ошибка", f"Папка не найдена: {folder_path}")
+        except Exception as e:
+            self.status_bar.showMessage(f"Ошибка при открытии папки: {str(e)}")
+            QMessageBox.critical(self, "Ошибка", f"Не удалось открыть папку: {str(e)}")
+
+    def close_document(self, doc_name):
+        """Закрытие документа в KOMPAS-3D по имени с автоматическим сохранением изменений"""
+        try:
+            if not hasattr(self, "app7") or not self.app7:
+                self.status_bar.showMessage("Нет подключения к KOMPAS-3D")
+                return
+
+            documents = self.app7.Documents
+            doc_to_close = None
+            for i in range(documents.Count):
+                try:
+                    doc = documents.Item(i)
+                    if doc is None:
+                        continue  # Пропускаем, если документ не существует
+                    if doc.Name == doc_name:
+                        doc_to_close = doc
+                        break
+                except Exception as e:
+                    self.status_bar.showMessage(
+                        f"Ошибка при доступе к документу: {str(e)}"
+                    )
+                    continue
+
+            if doc_to_close:
+                try:
+                    doc_to_close.Close(1)  # 2 = Сохранить изменения и закрыть
+                    self.status_bar.showMessage(
+                        f"Документ {doc_name} сохранен и закрыт"
+                    )
+                    # Даем небольшую задержку перед обновлением дерева
+                    QTimer.singleShot(100, self.update_documents_tree)
+                    QTimer.singleShot(150, self.update_active_document_info)
+                except Exception as e:
+                    self.status_bar.showMessage(
+                        f"Ошибка при закрытии документа: {str(e)}"
+                    )
+                    QMessageBox.critical(
+                        self, "Ошибка", f"Не удалось закрыть документ: {str(e)}"
+                    )
+            else:
+                self.status_bar.showMessage(
+                    f"Документ {doc_name} не найден среди открытых"
+                )
+        except Exception as e:
+            self.status_bar.showMessage(f"Ошибка при закрытии документа: {str(e)}")
+            QMessageBox.critical(
+                self, "Ошибка", f"Не удалось закрыть документ: {str(e)}"
+            )
 
     def create_right_panel(self):
         """Создание правой панели с шаблонами и редактором"""
@@ -409,7 +522,9 @@ class KompasApp(QMainWindow):
         """Создание строки статуса"""
         self.status_bar = QStatusBar()
         self.setStatusBar(self.status_bar)
-        self.status_bar.showMessage("Готово")
+        self.status_bar.showMessage(
+            "Готово", 2000
+        )  # Начальное сообщение с длительностью
 
         # Добавляем визуальные улучшения
         self.status_bar.setStyleSheet(
@@ -422,11 +537,13 @@ class KompasApp(QMainWindow):
             }
         """
         )
+        # Сохраняем начальный стиль после установки базового оформления
+        self.default_status_style = self.status_bar.styleSheet()
 
         self.docs_count_label = QLabel("Документов: 0")
         self.status_bar.addPermanentWidget(self.docs_count_label)
 
-        version_label = QLabel("v1.1.0 (2025)")
+        version_label = QLabel("v1.1.4 (2025)")
         self.status_bar.addPermanentWidget(version_label)
 
     def load_templates(self):
@@ -645,7 +762,7 @@ class KompasApp(QMainWindow):
         Горячие клавиши:
         Ctrl+K - Подключиться к KOMPAS-3D
         Ctrl+Q - Получить технические требования
-        Ctrl+S - Сохранить технические требования
+        Ctrl+S - Сохранить документ требования
         Ctrl+E - Применить технические требования
         Ctrl+Shift+S - Сохранить в PDF
         F5 - Обновить шаблоны
@@ -806,57 +923,33 @@ class KompasApp(QMainWindow):
         self.status_bar.showMessage(f"Вставлен шаблон: {full_text[:30]}...")
 
     def update_active_document_info(self):
-        """Обновление информации об активном документе"""
+        """Обновление информации об активном документе."""
         try:
             if not hasattr(self, "app7") or not self.app7:
                 self.connect_status.setText("🔴 Нет подключения")
                 self.connect_status.setStyleSheet("color: red;")
                 self.active_doc_label.setText("Нет активного документа")
-                self.status_bar.showMessage("Нет подключения к KOMPAS-3D")
                 return
 
             active_doc = self.app7.ActiveDocument
             if active_doc:
                 doc_name = active_doc.Name
-                doc_type = "Неизвестный тип"
-                try:
-                    doc2D_s = active_doc._oleobj_.QueryInterface(
-                        self.module7.NamesToIIDMap["IDrawingDocument"],
-                        pythoncom.IID_IDispatch,
-                    )
-                    doc_type = "Чертеж"
-                except:
-                    try:
-                        doc3D_s = active_doc._oleobj_.QueryInterface(
-                            self.module7.NamesToIIDMap["IDocument3D"],
-                            pythoncom.IID_IDispatch,
-                        )
-                        doc_type = "3D-модель"
-                    except:
-                        try:
-                            spec_s = active_doc._oleobj_.QueryInterface(
-                                self.module7.NamesToIIDMap["ISpecificationDocument"],
-                                pythoncom.IID_IDispatch,
-                            )
-                            doc_type = "Спецификация"
-                        except:
-                            pass
+                if not doc_name:  # Проверка на пустое имя
+                    self.active_doc_label.setText("Нет активного документа")
+                    return
+                doc_type = self.get_document_type(active_doc)
                 doc_path = active_doc.Path or "Документ не сохранен"
                 self.active_doc_label.setText(f"Документ: {doc_name} ({doc_type})")
                 self.connect_status.setText("🟢 Подключено")
                 self.connect_status.setStyleSheet("color: green;")
-                self.status_bar.showMessage(
-                    f"Активный документ: {doc_name} ({doc_type}) - {doc_path}"
-                )
                 self.select_document_in_tree(active_doc)
             else:
                 self.active_doc_label.setText("Нет активного документа")
-                self.status_bar.showMessage("Нет активного документа в KOMPAS-3D")
         except Exception as e:
-            self.status_bar.showMessage(
-                f"Ошибка при обновлении информации о документе: {str(e)}"
-            )
             self.active_doc_label.setText("Ошибка обновления информации")
+            self.status_bar.showMessage(
+                f"Ошибка при обновлении активного документа: {str(e)}"
+            )
 
     def on_document_double_click(self, item, column):
         """Обработка двойного клика на документе в дереве"""
@@ -979,14 +1072,12 @@ class KompasApp(QMainWindow):
             if not hasattr(self, "module7") or not self.module7:
                 self.connect_to_kompas()
                 if not hasattr(self, "module7") or not self.module7:
+                    self.set_status_message("Нет подключения к KOMPAS-3D", False)
                     return
 
             active_doc = self.app7.ActiveDocument
             if not active_doc:
-                self.status_bar.showMessage("Нет активного документа")
-                QMessageBox.warning(
-                    self, "Внимание", "Нет активного документа в КОМПАС-3D"
-                )
+                self.set_status_message("Нет активного документа", False)
                 return
 
             text_content = self.current_reqs_text.toPlainText().strip()
@@ -1007,9 +1098,9 @@ class KompasApp(QMainWindow):
                             drawing_document.Update()
                         elif hasattr(active_doc, "Update"):
                             active_doc.Update()
-                        self.status_bar.showMessage("Технические требования очищены")
+                        self.set_status_message("Технические требования очищены")
                     else:
-                        self.status_bar.showMessage(
+                        self.set_status_message(
                             "Нет технических требований для применения"
                         )
                     return
@@ -1080,35 +1171,31 @@ class KompasApp(QMainWindow):
                 if save_document:
                     try:
                         active_doc.Save()
-                        self.status_bar.showMessage("Документ сохранен")
+                        # Устанавливаем требуемое сообщение
+                        self.set_status_message(
+                            "Файл сохранен, технические требования обновлены",
+                            success=True,
+                        )
+                        # Откладываем вызов get_technical_requirements, чтобы сообщение успело отобразиться
+                        QTimer.singleShot(2000, self.get_technical_requirements)
                     except Exception as e:
                         error_msg = self.handle_kompas_error(e, "сохранения документа")
-                        self.status_bar.showMessage(
-                            "Не удалось сохранить документ автоматически"
-                        )
+                        self.set_status_message("Не удалось сохранить документ", False)
+                else:
+                    doc_name = active_doc.Name
+                    self.set_status_message(
+                        f"Технические требования применены к {doc_name}"
+                    )
+                    self.get_technical_requirements()
 
-                doc_name = active_doc.Name
-                self.status_bar.showMessage(
-                    f"Технические требования применены к {doc_name}"
-                    + (" и сохранены" if save_document else " (без сохранения файла)")
-                )
-                QMessageBox.information(
-                    self,
-                    "Информация",
-                    f"Технические требования успешно {'сохранены' if save_document else 'применены'} в {doc_name}",
-                )
-                # Автоматическое обновление технических требований после применения
-                self.get_technical_requirements()
             except Exception as e:
                 error_message = self.handle_kompas_error(
                     e, "применения технических требований"
                 )
-                self.status_bar.showMessage("Ошибка при применении тех. требований")
-                QMessageBox.critical(self, "Ошибка", error_message)
+                self.set_status_message("Ошибка при применении тех. требований", False)
         except Exception as e:
             error_message = self.handle_kompas_error(e, "работы с документом")
-            self.status_bar.showMessage("Ошибка при работе с документом")
-            QMessageBox.critical(self, "Ошибка", error_message)
+            self.set_status_message("Ошибка при работе с документом", False)
 
     def select_document_in_tree(self, document):
         """Выбор документа в дереве документов"""
@@ -1133,7 +1220,7 @@ class KompasApp(QMainWindow):
             pass
 
     def update_documents_tree(self, search_term=None):
-        """Обновление дерева документов"""
+        """Обновление дерева документов с учетом типов: чертежи, детали, сборки, спецификации и другие."""
         try:
             if not hasattr(self, "app7") or not self.app7:
                 self.status_bar.showMessage("Нет подключения к KOMPAS-3D")
@@ -1144,49 +1231,38 @@ class KompasApp(QMainWindow):
             doc_count = 0
 
             for i in range(documents.Count):
-                doc = documents.Item(i)
-                doc_name = doc.Name
-                if search_term and search_term.lower() not in doc_name.lower():
-                    continue
-
-                doc_type = "Неизвестный тип"
                 try:
-                    doc._oleobj_.QueryInterface(
-                        self.module7.NamesToIIDMap["IDrawingDocument"],
-                        pythoncom.IID_IDispatch,
+                    doc = documents.Item(i)
+                    if doc is None:
+                        continue  # Пропускаем, если документ не существует
+                    doc_name = doc.Name
+                    if not doc_name:  # Дополнительная проверка на пустое имя
+                        continue
+                    if search_term and search_term.lower() not in doc_name.lower():
+                        continue
+
+                    # Определяем тип документа через DocumentType
+                    doc_type = self.get_document_type(doc)
+
+                    doc_path = doc.Path or "Документ не сохранен"
+                    item = QTreeWidgetItem(self.doc_tree)
+                    item.setText(0, doc_name)
+                    item.setText(1, doc_type)
+                    item.setText(2, doc_path)
+
+                    if (
+                        self.app7.ActiveDocument
+                        and self.app7.ActiveDocument.Name == doc_name
+                    ):
+                        self.doc_tree.setCurrentItem(item)
+                        self.doc_tree.scrollToItem(item)
+
+                    doc_count += 1
+                except Exception as e:
+                    self.status_bar.showMessage(
+                        f"Ошибка при обработке документа: {str(e)}"
                     )
-                    doc_type = "Чертеж"
-                except:
-                    try:
-                        doc._oleobj_.QueryInterface(
-                            self.module7.NamesToIIDMap["IDocument3D"],
-                            pythoncom.IID_IDispatch,
-                        )
-                        doc_type = "3D-модель"
-                    except:
-                        try:
-                            doc._oleobj_.QueryInterface(
-                                self.module7.NamesToIIDMap["ISpecificationDocument"],
-                                pythoncom.IID_IDispatch,
-                            )
-                            doc_type = "Спецификация"
-                        except:
-                            pass
-
-                doc_path = doc.Path or "Документ не сохранен"
-                item = QTreeWidgetItem(self.doc_tree)
-                item.setText(0, doc_name)
-                item.setText(1, doc_type)
-                item.setText(2, doc_path)
-
-                if (
-                    self.app7.ActiveDocument
-                    and doc.Name == self.app7.ActiveDocument.Name
-                ):
-                    self.doc_tree.setCurrentItem(item)
-                    self.doc_tree.scrollToItem(item)
-
-                doc_count += 1
+                    continue
 
             self.status_bar.showMessage(f"Найдено документов: {doc_count}")
             self.docs_count_label.setText(f"Документов: {doc_count}")
@@ -1198,11 +1274,74 @@ class KompasApp(QMainWindow):
                 self, "Ошибка", f"Не удалось обновить дерево документов: {str(e)}"
             )
 
+    def get_document_type(self, doc):
+        """Определение типа документа по DocumentType с уточнением через интерфейсы."""
+        try:
+            doc_type_value = doc.DocumentType
+            if doc_type_value == 1:
+                return "Чертеж"
+            elif doc_type_value == 3:
+                return "Спецификация"
+            elif doc_type_value == 2:
+                return "Фрагмент"
+            elif doc_type_value == 4:
+                return "Модель"
+            elif doc_type_value == 5:
+                return "Сборка"
+
+            else:
+                # Дополнительная проверка через интерфейсы для неизвестных типов
+                try:
+                    doc._oleobj_.QueryInterface(
+                        self.module7.NamesToIIDMap["IDrawingDocument"],
+                        pythoncom.IID_IDispatch,
+                    )
+                    return "Чертеж"
+                except:
+                    try:
+                        doc3d = doc._oleobj_.QueryInterface(
+                            self.module7.NamesToIIDMap["IDocument3D"],
+                            pythoncom.IID_IDispatch,
+                        )
+                        try:
+                            doc3d._oleobj_.QueryInterface(
+                                self.module7.NamesToIIDMap["IPart7"],
+                                pythoncom.IID_IDispatch,
+                            )
+                            return "Деталь (3D-модель)"
+                        except:
+                            try:
+                                doc3d._oleobj_.QueryInterface(
+                                    self.module7.NamesToIIDMap["IAssembly7"],
+                                    pythoncom.IID_IDispatch,
+                                )
+                                return "Сборка (3D-модель)"
+                            except:
+                                return "3D-модель (неизвестный тип)"
+                    except:
+                        try:
+                            doc._oleobj_.QueryInterface(
+                                self.module7.NamesToIIDMap["ISpecificationDocument"],
+                                pythoncom.IID_IDispatch,
+                            )
+                            return "Спецификация"
+                        except:
+                            return f"Другой тип ({doc_type_value})"
+        except Exception:
+            return "Неизвестный тип"
+
     def periodic_update(self):
         """Периодическое обновление информации о документах"""
         try:
             if self.is_kompas_running():
-                self.update_active_document_info()
+                self.update_active_document_info()  # Обновление информации об активном документе
+                documents = self.app7.Documents
+                current_doc_count = documents.Count  # Текущее количество документов
+                if (
+                    current_doc_count != self.last_doc_count
+                ):  # Если количество изменилось
+                    self.update_documents_tree()  # Обновляем список документов
+                    self.last_doc_count = current_doc_count  # Сохраняем новое значение
             else:
                 self.connect_status.setText("🔴 Нет подключения")
                 self.connect_status.setStyleSheet("color: red;")
@@ -1533,7 +1672,7 @@ class KompasApp(QMainWindow):
             print(f"Error toggling auto numbering: {str(e)}")
 
     def parse_tech_req(self, text_lines):
-        """Парсинг технических требований из объекта TextLines"""
+        """Парсинг технических требований из объекта TextLines с сохранением пробелов вокруг тире"""
         formatted_text = ""
         count = 0
         current_req = ""
@@ -1542,36 +1681,51 @@ class KompasApp(QMainWindow):
         i = 0
         while i < text_lines.Count:
             line = text_lines.TextLines[i]
-            line_text = line.Str.strip()
-            if not line_text:
+            # Берем оригинальный текст без изменений
+            line_text = line.Str
+            if not line_text.strip():  # Пропускаем пустые строки
                 i += 1
                 continue
 
             if line.Numbering == 1:
+                # Если начинается новый нумерованный пункт
                 if current_req:
-                    formatted_text += f"{current_req_num}. {current_req}\n"
+                    formatted_text += f"{current_req_num}. {current_req.rstrip()}\n"
                 count += 1
                 current_req_num = count
-                current_req = line_text
+                current_req = line_text  # Начинаем новый пункт с оригинальным текстом
             else:
+                # Если строка является продолжением текущего пункта
                 if current_req:
+                    last_char = current_req[-1] if current_req else ""
+                    first_char = line_text[0] if line_text else ""
+                    # Проверяем, нужно ли добавить пробел
                     if (
-                        not current_req.endswith(" ")
-                        and not current_req.endswith("-")
-                        and not line_text.startswith("-")
+                        last_char
+                        not in (" ", "-")  # Последний символ не пробел и не тире
+                        and first_char != "-"  # Новая строка не начинается с тире
+                        and not line_text.startswith(
+                            " -"
+                        )  # Новая строка не начинается с " -"
                     ):
+                        current_req += " "
+                    # Если строка начинается с тире без пробела перед ним, добавляем пробел
+                    elif first_char == "-" and last_char != " ":
                         current_req += " "
                     current_req += line_text
                 else:
+                    # Если это первая строка без нумерации, начинаем новый пункт
                     count += 1
                     current_req_num = count
                     current_req = line_text
 
+            # Добавляем последний пункт, если он есть
             if i == text_lines.Count - 1 and current_req:
-                formatted_text += f"{current_req_num}. {current_req}\n"
+                formatted_text += f"{current_req_num}. {current_req.rstrip()}\n"
+
             i += 1
 
-        return formatted_text
+        return formatted_text.rstrip()  # Убираем лишний перенос в конце
 
     def clean_tech_req_line(self, line):
         """Очистка строки технических требований от нумерации и форматирования"""
@@ -1600,19 +1754,15 @@ class KompasApp(QMainWindow):
             if not hasattr(self, "app7") or not self.app7:
                 self.connect_to_kompas()
                 if not hasattr(self, "app7") or not self.app7:
-                    self.status_bar.showMessage("Не удалось подключиться к KOMPAS-3D")
-                    QMessageBox.critical(
-                        self, "Ошибка", "Не удалось подключиться к KOMPAS-3D"
+                    self.set_status_message(
+                        "Не удалось подключиться к KOMPAS-3D", False
                     )
                     return
 
             # Проверка активного документа
             active_doc = self.app7.ActiveDocument
             if not active_doc:
-                self.status_bar.showMessage("Нет активного документа")
-                QMessageBox.warning(
-                    self, "Ошибка", "Нет активного документа в KOMPAS-3D"
-                )
+                self.set_status_message("Нет активного документа", False)
                 return
 
             doc_name = active_doc.Name
@@ -1620,53 +1770,151 @@ class KompasApp(QMainWindow):
             # Проверка типа документа (должен быть чертеж)
             doc_type = active_doc.DocumentType
             if doc_type != 1:  # 1 - это тип чертежа
-                self.status_bar.showMessage("Активный документ не является чертежом")
-                QMessageBox.warning(
-                    self, "Ошибка", "Активный документ должен быть чертежом"
-                )
+                self.set_status_message("Активный документ не является чертежом", False)
                 return
+
             # Получение пути к файлу
             doc_path = active_doc.PathName
             if not doc_path:
-                self.status_bar.showMessage("Документ не сохранен")
-                QMessageBox.warning(self, "Ошибка", "Сначала сохраните документ")
+                self.set_status_message("Документ не сохранен", False)
                 return
 
             # Формирование пути для PDF
             doc_dir = os.path.dirname(doc_path)
             doc_name_without_ext = os.path.splitext(os.path.basename(doc_path))[0]
             pdf_folder = os.path.join(doc_dir, "Чертежи в pdf")
+            if not os.path.exists(pdf_folder):
+                os.makedirs(pdf_folder)
 
             pdf_path = os.path.join(pdf_folder, f"{doc_name_without_ext}.pdf")
+
             # Получение 2D интерфейса документа
             try:
                 doc_2d = win32com.client.Dispatch(active_doc, "ksDocument2D")
             except Exception as e:
-                self.status_bar.showMessage("Ошибка при получении интерфейса документа")
-                QMessageBox.critical(
-                    self, "Ошибка", f"Не удалось получить 2D интерфейс: {str(e)}"
-                )
+                self.set_status_message("Ошибка получения интерфейса документа", False)
                 return
 
             # Сохранение в PDF
             try:
                 result = doc_2d.SaveAs(pdf_path)
-                if result:
-                    self.status_bar.showMessage(f"Чертеж сохранен в PDF: {pdf_path}")
-                    QMessageBox.information(
-                        self, "Успех", f"Чертеж сохранен в PDF:\n{pdf_path}"
-                    )
+                if result or result == None:
+                    self.set_status_message(f"Чертеж сохранен в PDF: {pdf_path}")
+                else:
+                    self.set_status_message("Не удалось сохранить чертеж в PDF", False)
             except Exception as e:
-                self.status_bar.showMessage("Ошибка при сохранении в PDF")
-                QMessageBox.critical(
-                    self, "Ошибка", f"Ошибка сохранения в PDF: {str(e)}"
-                )
+                self.set_status_message(f"Ошибка сохранения в PDF: {str(e)}", False)
                 return
 
         except Exception as e:
             error_message = self.handle_kompas_error(e, "сохранения в PDF")
-            self.status_bar.showMessage("Критическая ошибка при сохранении в PDF")
-            QMessageBox.critical(self, "Ошибка", error_message)
+            self.set_status_message("Критическая ошибка при сохранении в PDF", False)
+
+    def set_status_message(self, message, success=True):
+        """Установка сообщения в статус-баре с цветом и возвратом к стандартному стилю"""
+        color = "green" if success else "red"
+        self.status_bar.setStyleSheet(f"QStatusBar {{ color: {color}; }}")
+        self.status_bar.showMessage(message, 2000)
+        QTimer.singleShot(2000, self.reset_status_style)
+
+    def reset_status_style(self):
+        """Возврат к стандартному стилю статус-бара"""
+        self.status_bar.setStyleSheet(self.default_status_style)
+
+    def save_all_drawings_to_pdf(self):
+        """Сохранение всех открытых чертежей в PDF с активацией каждого документа"""
+        try:
+            if not hasattr(self, "app7") or not self.app7:
+                self.connect_to_kompas()
+                if not hasattr(self, "app7") or not self.app7:
+                    self.set_status_message(
+                        "Не удалось подключиться к KOMPAS-3D", False
+                    )
+                    return
+
+            documents = self.app7.Documents
+            if documents.Count == 0:
+                self.set_status_message("Нет открытых документов", False)
+                return
+
+            saved_count = 0
+            drawing_count = 0
+            original_active_doc = (
+                self.app7.ActiveDocument
+            )  # Сохраняем текущий активный документ
+
+            # Сначала собираем все чертежи в список
+            drawings = []
+            for i in range(documents.Count):
+                doc = documents.Item(i)
+                if doc.DocumentType == 1:  # 1 - это тип чертежа
+                    drawings.append(doc)
+                    drawing_count += 1
+
+            if drawing_count == 0:
+                self.set_status_message("Нет открытых чертежей для сохранения", False)
+                return
+
+            # Перебираем чертежи и сохраняем их
+            for doc in drawings:
+                doc_path = doc.PathName
+                if not doc_path:
+                    self.set_status_message(
+                        f"Документ '{doc.Name}' не сохранен, пропускается", False
+                    )
+                    continue
+
+                # Активируем документ
+                try:
+                    doc.Active = True
+                    # Даем небольшую паузу для завершения активации
+                    QTimer.singleShot(100, lambda: None)  # Минимальная задержка
+
+                    doc_dir = os.path.dirname(doc_path)
+                    doc_name_without_ext = os.path.splitext(os.path.basename(doc_path))[
+                        0
+                    ]
+                    pdf_folder = os.path.join(doc_dir, "Чертежи в pdf")
+                    if not os.path.exists(pdf_folder):
+                        os.makedirs(pdf_folder)
+
+                    pdf_path = os.path.join(pdf_folder, f"{doc_name_without_ext}.pdf")
+
+                    # Сохранение в PDF
+                    doc_2d = win32com.client.Dispatch(doc, "ksDocument2D")
+                    result = doc_2d.SaveAs(pdf_path)
+                    if result or result is None:
+                        saved_count += 1
+                        self.set_status_message(f"Сохранен чертеж: {doc.Name}", True)
+                    else:
+                        self.set_status_message(
+                            f"Не удалось сохранить {doc.Name} в PDF", False
+                        )
+                except Exception as e:
+                    self.set_status_message(
+                        f"Ошибка сохранения {doc.Name}: {str(e)}", False
+                    )
+                    continue
+
+            # Восстанавливаем исходный активный документ
+            if original_active_doc:
+                try:
+                    original_active_doc.Active = True
+                except:
+                    pass
+
+            self.set_status_message(
+                f"Сохранено {saved_count} из {drawing_count} чертежей в PDF",
+                saved_count > 0,
+            )
+
+        except Exception as e:
+            error_message = self.handle_kompas_error(
+                e, "сохранения всех чертежей в PDF"
+            )
+            self.set_status_message(
+                "Критическая ошибка при сохранении всех чертежей", False
+            )
 
 
 class TemplateEditorDialog(QDialog):
@@ -2051,6 +2299,19 @@ class ThemeManager:
         QMainWindow, QDialog {
             background-color: #1F2526;
         }
+        QStatusBar {
+            background-color: #2A3033;
+            border-top: 1px solid #303940;
+            color: #A6ACAF;
+            min-height: 30px;
+            max-height: 30px;
+        }
+        QStatusBar::item {
+            border: none;
+        }
+        QLabel {
+            padding: 4px 8px;
+        }
         QWidget {
             font-size: 12px;
             letter-spacing: 0.5px;
@@ -2225,6 +2486,19 @@ class ThemeManager:
     LIGHT_THEME = """
         QMainWindow, QDialog {
             background-color: #F5F6FA;
+        }
+        QStatusBar {
+            background-color: #FFFFFF;
+            border-top: 1px solid #DCDFE6;
+            color: #606266;
+            min-height: 30px;
+            max-height: 30px;
+        }
+        QStatusBar::item {
+            border: none;
+        }
+        QLabel {
+            padding: 4px 8px;
         }
         QWidget {
             font-size: 12px;
