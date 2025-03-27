@@ -97,7 +97,7 @@ class KompasApp(QMainWindow):
 
         self.update_active_document_info()
         self.update_documents_tree()
-
+        self.last_doc_count = 0
         self.timer = QTimer()
         self.timer.timeout.connect(self.periodic_update)
         self.timer.start(1000)
@@ -169,7 +169,7 @@ class KompasApp(QMainWindow):
         get_req_action.triggered.connect(self.get_technical_requirements)
         file_menu.addAction(get_req_action)
 
-        save_req_action = QAction("Сохранить технические требования", self)
+        save_req_action = QAction("Сохранить документ требования", self)
         save_req_action.setShortcut("Ctrl+S")
         save_req_action.triggered.connect(self.save_technical_requirements)
         file_menu.addAction(save_req_action)
@@ -270,7 +270,7 @@ class KompasApp(QMainWindow):
 
         # Кнопка сохранения тех. требований
         save_btn = QAction("💾", self)
-        save_btn.setToolTip("Сохранить технические требования (Ctrl+S)")
+        save_btn.setToolTip("Сохранить документ требования (Ctrl+S)")
         save_btn.triggered.connect(self.save_technical_requirements)
         toolbar.addAction(save_btn)
 
@@ -374,8 +374,112 @@ class KompasApp(QMainWindow):
         self.doc_tree.setColumnWidth(2, 300)
         self.doc_tree.itemDoubleClicked.connect(self.on_document_double_click)
         left_layout.addWidget(self.doc_tree)
+        # Добавляем поддержку контекстного меню
+        self.doc_tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.doc_tree.customContextMenuRequested.connect(
+            self.show_document_context_menu
+        )
+        left_layout.addWidget(self.doc_tree)
 
         return left_panel
+
+    def show_document_context_menu(self, pos):
+        """Показ контекстного меню для документа в дереве"""
+        item = self.doc_tree.itemAt(pos)
+        if not item:
+            return
+
+        doc_name = item.text(0)
+        doc_path = item.text(2)
+
+        menu = QMenu(self)
+
+        # Действие "Открыть папку"
+        open_folder_action = QAction("Открыть папку", self)
+        open_folder_action.triggered.connect(
+            lambda: self.open_document_folder(doc_path)
+        )
+        menu.addAction(open_folder_action)
+
+        # Действие "Закрыть документ"
+        close_doc_action = QAction("Закрыть документ", self)
+        close_doc_action.triggered.connect(lambda: self.close_document(doc_name))
+        menu.addAction(close_doc_action)
+
+        # Показываем меню в позиции курсора
+        menu.exec(self.doc_tree.mapToGlobal(pos))
+
+    def open_document_folder(self, doc_path):
+        """Открытие папки с документом в проводнике"""
+        try:
+            if doc_path == "Документ не сохранен":
+                self.status_bar.showMessage("Документ не сохранен, папка недоступна")
+                QMessageBox.warning(
+                    self, "Ошибка", "Документ еще не сохранен на диске."
+                )
+                return
+
+            folder_path = os.path.dirname(doc_path)
+            if os.path.exists(folder_path):
+                os.startfile(
+                    folder_path
+                )  # Для Windows; для других ОС потребуется адаптация
+                self.status_bar.showMessage(f"Открыта папка: {folder_path}")
+            else:
+                self.status_bar.showMessage("Папка не найдена")
+                QMessageBox.warning(self, "Ошибка", f"Папка не найдена: {folder_path}")
+        except Exception as e:
+            self.status_bar.showMessage(f"Ошибка при открытии папки: {str(e)}")
+            QMessageBox.critical(self, "Ошибка", f"Не удалось открыть папку: {str(e)}")
+
+    def close_document(self, doc_name):
+        """Закрытие документа в KOMPAS-3D по имени с автоматическим сохранением изменений"""
+        try:
+            if not hasattr(self, "app7") or not self.app7:
+                self.status_bar.showMessage("Нет подключения к KOMPAS-3D")
+                return
+
+            documents = self.app7.Documents
+            doc_to_close = None
+            for i in range(documents.Count):
+                try:
+                    doc = documents.Item(i)
+                    if doc is None:
+                        continue  # Пропускаем, если документ не существует
+                    if doc.Name == doc_name:
+                        doc_to_close = doc
+                        break
+                except Exception as e:
+                    self.status_bar.showMessage(
+                        f"Ошибка при доступе к документу: {str(e)}"
+                    )
+                    continue
+
+            if doc_to_close:
+                try:
+                    doc_to_close.Close(1)  # 2 = Сохранить изменения и закрыть
+                    self.status_bar.showMessage(
+                        f"Документ {doc_name} сохранен и закрыт"
+                    )
+                    # Даем небольшую задержку перед обновлением дерева
+                    QTimer.singleShot(100, self.update_documents_tree)
+                    QTimer.singleShot(150, self.update_active_document_info)
+                except Exception as e:
+                    self.status_bar.showMessage(
+                        f"Ошибка при закрытии документа: {str(e)}"
+                    )
+                    QMessageBox.critical(
+                        self, "Ошибка", f"Не удалось закрыть документ: {str(e)}"
+                    )
+            else:
+                self.status_bar.showMessage(
+                    f"Документ {doc_name} не найден среди открытых"
+                )
+        except Exception as e:
+            self.status_bar.showMessage(f"Ошибка при закрытии документа: {str(e)}")
+            QMessageBox.critical(
+                self, "Ошибка", f"Не удалось закрыть документ: {str(e)}"
+            )
 
     def create_right_panel(self):
         """Создание правой панели с шаблонами и редактором"""
@@ -439,7 +543,7 @@ class KompasApp(QMainWindow):
         self.docs_count_label = QLabel("Документов: 0")
         self.status_bar.addPermanentWidget(self.docs_count_label)
 
-        version_label = QLabel("v1.1.3 (2025)")
+        version_label = QLabel("v1.1.4 (2025)")
         self.status_bar.addPermanentWidget(version_label)
 
     def load_templates(self):
@@ -658,7 +762,7 @@ class KompasApp(QMainWindow):
         Горячие клавиши:
         Ctrl+K - Подключиться к KOMPAS-3D
         Ctrl+Q - Получить технические требования
-        Ctrl+S - Сохранить технические требования
+        Ctrl+S - Сохранить документ требования
         Ctrl+E - Применить технические требования
         Ctrl+Shift+S - Сохранить в PDF
         F5 - Обновить шаблоны
@@ -819,7 +923,7 @@ class KompasApp(QMainWindow):
         self.status_bar.showMessage(f"Вставлен шаблон: {full_text[:30]}...")
 
     def update_active_document_info(self):
-        """Обновление информации об активном документе"""
+        """Обновление информации об активном документе."""
         try:
             if not hasattr(self, "app7") or not self.app7:
                 self.connect_status.setText("🔴 Нет подключения")
@@ -830,29 +934,10 @@ class KompasApp(QMainWindow):
             active_doc = self.app7.ActiveDocument
             if active_doc:
                 doc_name = active_doc.Name
-                doc_type = "Неизвестный тип"
-                try:
-                    doc2D_s = active_doc._oleobj_.QueryInterface(
-                        self.module7.NamesToIIDMap["IDrawingDocument"],
-                        pythoncom.IID_IDispatch,
-                    )
-                    doc_type = "Чертеж"
-                except:
-                    try:
-                        doc3D_s = active_doc._oleobj_.QueryInterface(
-                            self.module7.NamesToIIDMap["IDocument3D"],
-                            pythoncom.IID_IDispatch,
-                        )
-                        doc_type = "3D-модель"
-                    except:
-                        try:
-                            spec_s = active_doc._oleobj_.QueryInterface(
-                                self.module7.NamesToIIDMap["ISpecificationDocument"],
-                                pythoncom.IID_IDispatch,
-                            )
-                            doc_type = "Спецификация"
-                        except:
-                            pass
+                if not doc_name:  # Проверка на пустое имя
+                    self.active_doc_label.setText("Нет активного документа")
+                    return
+                doc_type = self.get_document_type(active_doc)
                 doc_path = active_doc.Path or "Документ не сохранен"
                 self.active_doc_label.setText(f"Документ: {doc_name} ({doc_type})")
                 self.connect_status.setText("🟢 Подключено")
@@ -862,7 +947,9 @@ class KompasApp(QMainWindow):
                 self.active_doc_label.setText("Нет активного документа")
         except Exception as e:
             self.active_doc_label.setText("Ошибка обновления информации")
-        # Убираем сообщение в статус-баре
+            self.status_bar.showMessage(
+                f"Ошибка при обновлении активного документа: {str(e)}"
+            )
 
     def on_document_double_click(self, item, column):
         """Обработка двойного клика на документе в дереве"""
@@ -1133,7 +1220,7 @@ class KompasApp(QMainWindow):
             pass
 
     def update_documents_tree(self, search_term=None):
-        """Обновление дерева документов"""
+        """Обновление дерева документов с учетом типов: чертежи, детали, сборки, спецификации и другие."""
         try:
             if not hasattr(self, "app7") or not self.app7:
                 self.status_bar.showMessage("Нет подключения к KOMPAS-3D")
@@ -1144,49 +1231,38 @@ class KompasApp(QMainWindow):
             doc_count = 0
 
             for i in range(documents.Count):
-                doc = documents.Item(i)
-                doc_name = doc.Name
-                if search_term and search_term.lower() not in doc_name.lower():
-                    continue
-
-                doc_type = "Неизвестный тип"
                 try:
-                    doc._oleobj_.QueryInterface(
-                        self.module7.NamesToIIDMap["IDrawingDocument"],
-                        pythoncom.IID_IDispatch,
+                    doc = documents.Item(i)
+                    if doc is None:
+                        continue  # Пропускаем, если документ не существует
+                    doc_name = doc.Name
+                    if not doc_name:  # Дополнительная проверка на пустое имя
+                        continue
+                    if search_term and search_term.lower() not in doc_name.lower():
+                        continue
+
+                    # Определяем тип документа через DocumentType
+                    doc_type = self.get_document_type(doc)
+
+                    doc_path = doc.Path or "Документ не сохранен"
+                    item = QTreeWidgetItem(self.doc_tree)
+                    item.setText(0, doc_name)
+                    item.setText(1, doc_type)
+                    item.setText(2, doc_path)
+
+                    if (
+                        self.app7.ActiveDocument
+                        and self.app7.ActiveDocument.Name == doc_name
+                    ):
+                        self.doc_tree.setCurrentItem(item)
+                        self.doc_tree.scrollToItem(item)
+
+                    doc_count += 1
+                except Exception as e:
+                    self.status_bar.showMessage(
+                        f"Ошибка при обработке документа: {str(e)}"
                     )
-                    doc_type = "Чертеж"
-                except:
-                    try:
-                        doc._oleobj_.QueryInterface(
-                            self.module7.NamesToIIDMap["IDocument3D"],
-                            pythoncom.IID_IDispatch,
-                        )
-                        doc_type = "3D-модель"
-                    except:
-                        try:
-                            doc._oleobj_.QueryInterface(
-                                self.module7.NamesToIIDMap["ISpecificationDocument"],
-                                pythoncom.IID_IDispatch,
-                            )
-                            doc_type = "Спецификация"
-                        except:
-                            pass
-
-                doc_path = doc.Path or "Документ не сохранен"
-                item = QTreeWidgetItem(self.doc_tree)
-                item.setText(0, doc_name)
-                item.setText(1, doc_type)
-                item.setText(2, doc_path)
-
-                if (
-                    self.app7.ActiveDocument
-                    and doc.Name == self.app7.ActiveDocument.Name
-                ):
-                    self.doc_tree.setCurrentItem(item)
-                    self.doc_tree.scrollToItem(item)
-
-                doc_count += 1
+                    continue
 
             self.status_bar.showMessage(f"Найдено документов: {doc_count}")
             self.docs_count_label.setText(f"Документов: {doc_count}")
@@ -1198,11 +1274,74 @@ class KompasApp(QMainWindow):
                 self, "Ошибка", f"Не удалось обновить дерево документов: {str(e)}"
             )
 
+    def get_document_type(self, doc):
+        """Определение типа документа по DocumentType с уточнением через интерфейсы."""
+        try:
+            doc_type_value = doc.DocumentType
+            if doc_type_value == 1:
+                return "Чертеж"
+            elif doc_type_value == 3:
+                return "Спецификация"
+            elif doc_type_value == 2:
+                return "Фрагмент"
+            elif doc_type_value == 4:
+                return "Модель"
+            elif doc_type_value == 5:
+                return "Сборка"
+
+            else:
+                # Дополнительная проверка через интерфейсы для неизвестных типов
+                try:
+                    doc._oleobj_.QueryInterface(
+                        self.module7.NamesToIIDMap["IDrawingDocument"],
+                        pythoncom.IID_IDispatch,
+                    )
+                    return "Чертеж"
+                except:
+                    try:
+                        doc3d = doc._oleobj_.QueryInterface(
+                            self.module7.NamesToIIDMap["IDocument3D"],
+                            pythoncom.IID_IDispatch,
+                        )
+                        try:
+                            doc3d._oleobj_.QueryInterface(
+                                self.module7.NamesToIIDMap["IPart7"],
+                                pythoncom.IID_IDispatch,
+                            )
+                            return "Деталь (3D-модель)"
+                        except:
+                            try:
+                                doc3d._oleobj_.QueryInterface(
+                                    self.module7.NamesToIIDMap["IAssembly7"],
+                                    pythoncom.IID_IDispatch,
+                                )
+                                return "Сборка (3D-модель)"
+                            except:
+                                return "3D-модель (неизвестный тип)"
+                    except:
+                        try:
+                            doc._oleobj_.QueryInterface(
+                                self.module7.NamesToIIDMap["ISpecificationDocument"],
+                                pythoncom.IID_IDispatch,
+                            )
+                            return "Спецификация"
+                        except:
+                            return f"Другой тип ({doc_type_value})"
+        except Exception:
+            return "Неизвестный тип"
+
     def periodic_update(self):
         """Периодическое обновление информации о документах"""
         try:
             if self.is_kompas_running():
-                self.update_active_document_info()
+                self.update_active_document_info()  # Обновление информации об активном документе
+                documents = self.app7.Documents
+                current_doc_count = documents.Count  # Текущее количество документов
+                if (
+                    current_doc_count != self.last_doc_count
+                ):  # Если количество изменилось
+                    self.update_documents_tree()  # Обновляем список документов
+                    self.last_doc_count = current_doc_count  # Сохраняем новое значение
             else:
                 self.connect_status.setText("🔴 Нет подключения")
                 self.connect_status.setStyleSheet("color: red;")
