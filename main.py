@@ -66,6 +66,9 @@ class KompasApp(QMainWindow):
         self.dark_mode = self.load_theme_setting()
 
         self.status_bar = self.statusBar()
+        self.default_status_style = self.status_bar.styleSheet()
+        # Устанавливаем начальное сообщение с длительностью 5000 мс (5 секунд)
+        self.status_bar.showMessage("Приложение запущено", 2000)
         self.status_bar.showMessage("Приложение запущено")
         self.setWindowTitle("Редактор технических требований KOMPAS-3D")
         self.setGeometry(100, 100, 1400, 900)
@@ -409,7 +412,9 @@ class KompasApp(QMainWindow):
         """Создание строки статуса"""
         self.status_bar = QStatusBar()
         self.setStatusBar(self.status_bar)
-        self.status_bar.showMessage("Готово")
+        self.status_bar.showMessage(
+            "Готово", 2000
+        )  # Начальное сообщение с длительностью
 
         # Добавляем визуальные улучшения
         self.status_bar.setStyleSheet(
@@ -422,11 +427,13 @@ class KompasApp(QMainWindow):
             }
         """
         )
+        # Сохраняем начальный стиль после установки базового оформления
+        self.default_status_style = self.status_bar.styleSheet()
 
         self.docs_count_label = QLabel("Документов: 0")
         self.status_bar.addPermanentWidget(self.docs_count_label)
 
-        version_label = QLabel("v1.1.1 (2025)")
+        version_label = QLabel("v1.1.2 (2025)")
         self.status_bar.addPermanentWidget(version_label)
 
     def load_templates(self):
@@ -812,7 +819,6 @@ class KompasApp(QMainWindow):
                 self.connect_status.setText("🔴 Нет подключения")
                 self.connect_status.setStyleSheet("color: red;")
                 self.active_doc_label.setText("Нет активного документа")
-                self.status_bar.showMessage("Нет подключения к KOMPAS-3D")
                 return
 
             active_doc = self.app7.ActiveDocument
@@ -845,18 +851,12 @@ class KompasApp(QMainWindow):
                 self.active_doc_label.setText(f"Документ: {doc_name} ({doc_type})")
                 self.connect_status.setText("🟢 Подключено")
                 self.connect_status.setStyleSheet("color: green;")
-                self.status_bar.showMessage(
-                    f"Активный документ: {doc_name} ({doc_type}) - {doc_path}"
-                )
                 self.select_document_in_tree(active_doc)
             else:
                 self.active_doc_label.setText("Нет активного документа")
-                self.status_bar.showMessage("Нет активного документа в KOMPAS-3D")
         except Exception as e:
-            self.status_bar.showMessage(
-                f"Ошибка при обновлении информации о документе: {str(e)}"
-            )
             self.active_doc_label.setText("Ошибка обновления информации")
+        # Убираем сообщение в статус-баре
 
     def on_document_double_click(self, item, column):
         """Обработка двойного клика на документе в дереве"""
@@ -979,14 +979,12 @@ class KompasApp(QMainWindow):
             if not hasattr(self, "module7") or not self.module7:
                 self.connect_to_kompas()
                 if not hasattr(self, "module7") or not self.module7:
+                    self.set_status_message("Нет подключения к KOMPAS-3D", False)
                     return
 
             active_doc = self.app7.ActiveDocument
             if not active_doc:
-                self.status_bar.showMessage("Нет активного документа")
-                QMessageBox.warning(
-                    self, "Внимание", "Нет активного документа в КОМПАС-3D"
-                )
+                self.set_status_message("Нет активного документа", False)
                 return
 
             text_content = self.current_reqs_text.toPlainText().strip()
@@ -1007,9 +1005,9 @@ class KompasApp(QMainWindow):
                             drawing_document.Update()
                         elif hasattr(active_doc, "Update"):
                             active_doc.Update()
-                        self.status_bar.showMessage("Технические требования очищены")
+                        self.set_status_message("Технические требования очищены")
                     else:
-                        self.status_bar.showMessage(
+                        self.set_status_message(
                             "Нет технических требований для применения"
                         )
                     return
@@ -1080,35 +1078,31 @@ class KompasApp(QMainWindow):
                 if save_document:
                     try:
                         active_doc.Save()
-                        self.status_bar.showMessage("Документ сохранен")
+                        # Устанавливаем требуемое сообщение
+                        self.set_status_message(
+                            "Файл сохранен, технические требования обновлены",
+                            success=True,
+                        )
+                        # Откладываем вызов get_technical_requirements, чтобы сообщение успело отобразиться
+                        QTimer.singleShot(2000, self.get_technical_requirements)
                     except Exception as e:
                         error_msg = self.handle_kompas_error(e, "сохранения документа")
-                        self.status_bar.showMessage(
-                            "Не удалось сохранить документ автоматически"
-                        )
+                        self.set_status_message("Не удалось сохранить документ", False)
+                else:
+                    doc_name = active_doc.Name
+                    self.set_status_message(
+                        f"Технические требования применены к {doc_name}"
+                    )
+                    self.get_technical_requirements()
 
-                doc_name = active_doc.Name
-                self.status_bar.showMessage(
-                    f"Технические требования применены к {doc_name}"
-                    + (" и сохранены" if save_document else " (без сохранения файла)")
-                )
-                QMessageBox.information(
-                    self,
-                    "Информация",
-                    f"Технические требования успешно {'сохранены' if save_document else 'применены'} в {doc_name}",
-                )
-                # Автоматическое обновление технических требований после применения
-                self.get_technical_requirements()
             except Exception as e:
                 error_message = self.handle_kompas_error(
                     e, "применения технических требований"
                 )
-                self.status_bar.showMessage("Ошибка при применении тех. требований")
-                QMessageBox.critical(self, "Ошибка", error_message)
+                self.set_status_message("Ошибка при применении тех. требований", False)
         except Exception as e:
             error_message = self.handle_kompas_error(e, "работы с документом")
-            self.status_bar.showMessage("Ошибка при работе с документом")
-            QMessageBox.critical(self, "Ошибка", error_message)
+            self.set_status_message("Ошибка при работе с документом", False)
 
     def select_document_in_tree(self, document):
         """Выбор документа в дереве документов"""
@@ -1615,19 +1609,15 @@ class KompasApp(QMainWindow):
             if not hasattr(self, "app7") or not self.app7:
                 self.connect_to_kompas()
                 if not hasattr(self, "app7") or not self.app7:
-                    self.status_bar.showMessage("Не удалось подключиться к KOMPAS-3D")
-                    QMessageBox.critical(
-                        self, "Ошибка", "Не удалось подключиться к KOMPAS-3D"
+                    self.set_status_message(
+                        "Не удалось подключиться к KOMPAS-3D", False
                     )
                     return
 
             # Проверка активного документа
             active_doc = self.app7.ActiveDocument
             if not active_doc:
-                self.status_bar.showMessage("Нет активного документа")
-                QMessageBox.warning(
-                    self, "Ошибка", "Нет активного документа в KOMPAS-3D"
-                )
+                self.set_status_message("Нет активного документа", False)
                 return
 
             doc_name = active_doc.Name
@@ -1635,53 +1625,56 @@ class KompasApp(QMainWindow):
             # Проверка типа документа (должен быть чертеж)
             doc_type = active_doc.DocumentType
             if doc_type != 1:  # 1 - это тип чертежа
-                self.status_bar.showMessage("Активный документ не является чертежом")
-                QMessageBox.warning(
-                    self, "Ошибка", "Активный документ должен быть чертежом"
-                )
+                self.set_status_message("Активный документ не является чертежом", False)
                 return
+
             # Получение пути к файлу
             doc_path = active_doc.PathName
             if not doc_path:
-                self.status_bar.showMessage("Документ не сохранен")
-                QMessageBox.warning(self, "Ошибка", "Сначала сохраните документ")
+                self.set_status_message("Документ не сохранен", False)
                 return
 
             # Формирование пути для PDF
             doc_dir = os.path.dirname(doc_path)
             doc_name_without_ext = os.path.splitext(os.path.basename(doc_path))[0]
             pdf_folder = os.path.join(doc_dir, "Чертежи в pdf")
+            if not os.path.exists(pdf_folder):
+                os.makedirs(pdf_folder)
 
             pdf_path = os.path.join(pdf_folder, f"{doc_name_without_ext}.pdf")
+
             # Получение 2D интерфейса документа
             try:
                 doc_2d = win32com.client.Dispatch(active_doc, "ksDocument2D")
             except Exception as e:
-                self.status_bar.showMessage("Ошибка при получении интерфейса документа")
-                QMessageBox.critical(
-                    self, "Ошибка", f"Не удалось получить 2D интерфейс: {str(e)}"
-                )
+                self.set_status_message("Ошибка получения интерфейса документа", False)
                 return
 
             # Сохранение в PDF
             try:
                 result = doc_2d.SaveAs(pdf_path)
-                if result:
-                    self.status_bar.showMessage(f"Чертеж сохранен в PDF: {pdf_path}")
-                    QMessageBox.information(
-                        self, "Успех", f"Чертеж сохранен в PDF:\n{pdf_path}"
-                    )
+                if result or result == None:
+                    self.set_status_message(f"Чертеж сохранен в PDF: {pdf_path}")
+                else:
+                    self.set_status_message("Не удалось сохранить чертеж в PDF", False)
             except Exception as e:
-                self.status_bar.showMessage("Ошибка при сохранении в PDF")
-                QMessageBox.critical(
-                    self, "Ошибка", f"Ошибка сохранения в PDF: {str(e)}"
-                )
+                self.set_status_message(f"Ошибка сохранения в PDF: {str(e)}", False)
                 return
 
         except Exception as e:
             error_message = self.handle_kompas_error(e, "сохранения в PDF")
-            self.status_bar.showMessage("Критическая ошибка при сохранении в PDF")
-            QMessageBox.critical(self, "Ошибка", error_message)
+            self.set_status_message("Критическая ошибка при сохранении в PDF", False)
+
+    def set_status_message(self, message, success=True):
+        """Установка сообщения в статус-баре с цветом и возвратом к стандартному стилю"""
+        color = "green" if success else "red"
+        self.status_bar.setStyleSheet(f"QStatusBar {{ color: {color}; }}")
+        self.status_bar.showMessage(message, 2000)
+        QTimer.singleShot(2000, self.reset_status_style)
+
+    def reset_status_style(self):
+        """Возврат к стандартному стилю статус-бара"""
+        self.status_bar.setStyleSheet(self.default_status_style)
 
 
 class TemplateEditorDialog(QDialog):
@@ -2066,6 +2059,19 @@ class ThemeManager:
         QMainWindow, QDialog {
             background-color: #1F2526;
         }
+        QStatusBar {
+            background-color: #2A3033;
+            border-top: 1px solid #303940;
+            color: #A6ACAF;
+            min-height: 30px;
+            max-height: 30px;
+        }
+        QStatusBar::item {
+            border: none;
+        }
+        QLabel {
+            padding: 4px 8px;
+        }
         QWidget {
             font-size: 12px;
             letter-spacing: 0.5px;
@@ -2240,6 +2246,19 @@ class ThemeManager:
     LIGHT_THEME = """
         QMainWindow, QDialog {
             background-color: #F5F6FA;
+        }
+        QStatusBar {
+            background-color: #FFFFFF;
+            border-top: 1px solid #DCDFE6;
+            color: #606266;
+            min-height: 30px;
+            max-height: 30px;
+        }
+        QStatusBar::item {
+            border: none;
+        }
+        QLabel {
+            padding: 4px 8px;
         }
         QWidget {
             font-size: 12px;
