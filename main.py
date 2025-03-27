@@ -426,7 +426,7 @@ class KompasApp(QMainWindow):
         self.docs_count_label = QLabel("Документов: 0")
         self.status_bar.addPermanentWidget(self.docs_count_label)
 
-        version_label = QLabel("v1.1.0 (2025)")
+        version_label = QLabel("v1.1.1 (2025)")
         self.status_bar.addPermanentWidget(version_label)
 
     def load_templates(self):
@@ -1533,7 +1533,7 @@ class KompasApp(QMainWindow):
             print(f"Error toggling auto numbering: {str(e)}")
 
     def parse_tech_req(self, text_lines):
-        """Парсинг технических требований из объекта TextLines"""
+        """Парсинг технических требований из объекта TextLines с сохранением пробелов вокруг тире"""
         formatted_text = ""
         count = 0
         current_req = ""
@@ -1542,36 +1542,51 @@ class KompasApp(QMainWindow):
         i = 0
         while i < text_lines.Count:
             line = text_lines.TextLines[i]
-            line_text = line.Str.strip()
-            if not line_text:
+            # Берем оригинальный текст без изменений
+            line_text = line.Str
+            if not line_text.strip():  # Пропускаем пустые строки
                 i += 1
                 continue
 
             if line.Numbering == 1:
+                # Если начинается новый нумерованный пункт
                 if current_req:
-                    formatted_text += f"{current_req_num}. {current_req}\n"
+                    formatted_text += f"{current_req_num}. {current_req.rstrip()}\n"
                 count += 1
                 current_req_num = count
-                current_req = line_text
+                current_req = line_text  # Начинаем новый пункт с оригинальным текстом
             else:
+                # Если строка является продолжением текущего пункта
                 if current_req:
+                    last_char = current_req[-1] if current_req else ""
+                    first_char = line_text[0] if line_text else ""
+                    # Проверяем, нужно ли добавить пробел
                     if (
-                        not current_req.endswith(" ")
-                        and not current_req.endswith("-")
-                        and not line_text.startswith("-")
+                        last_char
+                        not in (" ", "-")  # Последний символ не пробел и не тире
+                        and first_char != "-"  # Новая строка не начинается с тире
+                        and not line_text.startswith(
+                            " -"
+                        )  # Новая строка не начинается с " -"
                     ):
+                        current_req += " "
+                    # Если строка начинается с тире без пробела перед ним, добавляем пробел
+                    elif first_char == "-" and last_char != " ":
                         current_req += " "
                     current_req += line_text
                 else:
+                    # Если это первая строка без нумерации, начинаем новый пункт
                     count += 1
                     current_req_num = count
                     current_req = line_text
 
+            # Добавляем последний пункт, если он есть
             if i == text_lines.Count - 1 and current_req:
-                formatted_text += f"{current_req_num}. {current_req}\n"
+                formatted_text += f"{current_req_num}. {current_req.rstrip()}\n"
+
             i += 1
 
-        return formatted_text
+        return formatted_text.rstrip()  # Убираем лишний перенос в конце
 
     def clean_tech_req_line(self, line):
         """Очистка строки технических требований от нумерации и форматирования"""
