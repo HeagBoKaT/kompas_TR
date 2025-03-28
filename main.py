@@ -957,7 +957,7 @@ class KompasApp(QMainWindow):
         doc_type = item.text(1)
         if self.activate_document_by_name(doc_name):
             if doc_type == "Чертеж":
-                QTimer.singleShot(500, self.get_technical_requirements)
+                QTimer.singleShot(100, self.get_technical_requirements)
                 self.status_bar.showMessage("Загрузка технических требований...")
 
     def activate_document_by_name(self, doc_name):
