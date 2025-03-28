@@ -5,9 +5,11 @@ import logging
 from datetime import datetime
 from PyQt6.QtWidgets import (
     QApplication,
+    QDialogButtonBox,
     QHeaderView,
     QListWidgetItem,
     QMainWindow,
+    QRadioButton,
     QStyle,
     QTableWidget,
     QTableWidgetItem,
@@ -41,6 +43,7 @@ from PyQt6.QtWidgets import (
     QTextEdit,
     QLabel,
     QMessageBox,
+    QAbstractItemView,
 )
 
 from PyQt6.QtGui import QIcon, QFont, QTextCharFormat, QTextCursor, QAction
@@ -62,14 +65,14 @@ class KompasApp(QMainWindow):
             os.makedirs(app_folder)
         self.settings_file = os.path.join(app_folder, "settings.json")
 
-        # Загружаем настройки темы (по умолчанию светлая)
-        self.dark_mode = self.load_theme_setting()
-
+        # Инициализация status_bar до load_settings
         self.status_bar = self.statusBar()
         self.default_status_style = self.status_bar.styleSheet()
-        # Устанавливаем начальное сообщение с длительностью 5000 мс (5 секунд)
         self.status_bar.showMessage("Приложение запущено", 2000)
-        self.status_bar.showMessage("Приложение запущено")
+
+        # Загружаем настройки (тема и горячие клавиши)
+        self.dark_mode, self.shortcuts = self.load_settings()
+
         self.setWindowTitle("Редактор технических требований KOMPAS-3D")
         self.setGeometry(100, 100, 1400, 900)
         self.setMinimumSize(1000, 700)
@@ -102,6 +105,81 @@ class KompasApp(QMainWindow):
         self.timer.timeout.connect(self.periodic_update)
         self.timer.start(1000)
 
+    def open_settings(self):
+        dialog = SettingsDialog(self)
+        dialog.exec()
+        self.apply_theme()  # Обновляем стиль основного окна после закрытия диалога
+
+    def load_settings(self):
+        """Загрузка настроек из файла"""
+        # Определяем настройки по умолчанию
+        default_shortcuts = {
+            "connect_to_kompas": "Ctrl+K",
+            "check_connection": "",
+            "get_requirements": "Ctrl+Q",
+            "save_requirements": "Ctrl+S",
+            "apply_requirements": "Ctrl+E",
+            "save_to_pdf": "Ctrl+Shift+S",
+            "open_settings": "Ctrl+I",
+            "disconnect_from_kompas": "",
+            "exit": "Alt+F4",
+            "edit_templates": "",
+            "reload_templates": "F5",
+            "refresh_docs": "F6",
+            "about": "",
+            "shortcuts": "",
+        }
+        default_settings = {"dark_mode": False, "shortcuts": default_shortcuts}
+
+        try:
+            # Если файл настроек не существует, создаем его с настройками по умолчанию
+            if not os.path.exists(self.settings_file):
+                with open(self.settings_file, "w", encoding="utf-8") as f:
+                    json.dump(default_settings, f, ensure_ascii=False, indent=4)
+                return False, default_shortcuts
+
+            # Загружаем существующий файл настроек
+            with open(self.settings_file, "r", encoding="utf-8") as f:
+                settings = json.load(f)
+
+            # Проверяем, соответствует ли структура файла ожидаемой разметке
+            if (
+                not isinstance(settings, dict)
+                or "dark_mode" not in settings
+                or "shortcuts" not in settings
+            ):
+                # Если структура устарела (например, нет ключа "shortcuts"), перезаписываем файл
+                self.status_bar.showMessage(
+                    "Файл настроек устарел. Восстанавливаю настройки по умолчанию."
+                )
+                with open(self.settings_file, "w", encoding="utf-8") as f:
+                    json.dump(default_settings, f, ensure_ascii=False, indent=4)
+                return False, default_shortcuts
+
+            # Если структура корректна, загружаем настройки
+            dark_mode = settings.get("dark_mode", False)
+            shortcuts = settings.get("shortcuts", default_shortcuts)
+
+            # Дополняем недостающие горячие клавиши значениями по умолчанию
+            for key in default_shortcuts:
+                if key not in shortcuts:
+                    shortcuts[key] = default_shortcuts[key]
+                    # Обновляем файл, если добавлены новые горячие клавиши
+                    settings["shortcuts"] = shortcuts
+                    with open(self.settings_file, "w", encoding="utf-8") as f:
+                        json.dump(settings, f, ensure_ascii=False, indent=4)
+
+            return dark_mode, shortcuts
+
+        except Exception as e:
+            # В случае любой ошибки (например, файл поврежден) перезаписываем его
+            self.status_bar.showMessage(
+                f"Ошибка загрузки настроек: {str(e)}. Восстанавливаю настройки по умолчанию."
+            )
+            with open(self.settings_file, "w", encoding="utf-8") as f:
+                json.dump(default_settings, f, ensure_ascii=False, indent=4)
+            return False, default_shortcuts
+
     def apply_theme(self):
         ThemeManager.apply_theme(self, self.dark_mode)
 
@@ -122,6 +200,33 @@ class KompasApp(QMainWindow):
             self.status_bar.showMessage(f"Ошибка загрузки настроек темы: {str(e)}")
             # В случае ошибки возвращаем светлую тему
             return False
+
+    def save_settings(self):
+        """Сохранение настроек в файл"""
+        try:
+            settings = {"dark_mode": self.dark_mode, "shortcuts": self.shortcuts}
+            with open(self.settings_file, "w", encoding="utf-8") as f:
+                json.dump(settings, f, ensure_ascii=False, indent=4)
+            self.status_bar.showMessage("Настройки сохранены")
+        except Exception as e:
+            self.status_bar.showMessage(f"Ошибка сохранения настроек: {str(e)}")
+
+    def apply_shortcuts(self):
+        """Применение горячих клавиш к действиям"""
+        self.connect_action.setShortcut(self.shortcuts["connect_to_kompas"])
+        self.check_connect_action.setShortcut(self.shortcuts["check_connection"])
+        self.get_req_action.setShortcut(self.shortcuts["get_requirements"])
+        self.save_req_action.setShortcut(self.shortcuts["save_requirements"])
+        self.apply_req_action.setShortcut(self.shortcuts["apply_requirements"])
+        self.save_pdf_action.setShortcut(self.shortcuts["save_to_pdf"])
+        self.settings_action.setShortcut(self.shortcuts["open_settings"])
+        self.disconnect_action.setShortcut(self.shortcuts["disconnect_from_kompas"])
+        self.exit_action.setShortcut(self.shortcuts["exit"])
+        self.edit_templates_action.setShortcut(self.shortcuts["edit_templates"])
+        self.reload_templates_action.setShortcut(self.shortcuts["reload_templates"])
+        self.refresh_docs_action.setShortcut(self.shortcuts["refresh_docs"])
+        self.about_action.setShortcut(self.shortcuts["about"])
+        self.shortcuts_action.setShortcut(self.shortcuts["shortcuts"])
 
     def save_theme_setting(self):
         """Сохранение настройки темы в файл"""
@@ -148,88 +253,84 @@ class KompasApp(QMainWindow):
         self.create_status_bar()
 
     def create_menu(self):
-        """Создание главного меню"""
+        """Создание главного меню с действиями"""
         menu_bar = self.menuBar()
 
         # Меню "Файл"
         file_menu = menu_bar.addMenu("Файл")
-        connect_action = QAction("Подключиться к KOMPAS-3D", self)
-        connect_action.setShortcut("Ctrl+K")
-        connect_action.triggered.connect(self.connect_to_kompas)
-        file_menu.addAction(connect_action)
+        self.connect_action = QAction("Подключиться к KOMPAS-3D", self)
+        self.connect_action.triggered.connect(self.connect_to_kompas)
+        file_menu.addAction(self.connect_action)
 
-        check_connect_action = QAction("Проверить подключение", self)
-        check_connect_action.triggered.connect(self.check_kompas_connection)
-        file_menu.addAction(check_connect_action)
-
-        file_menu.addSeparator()
-
-        get_req_action = QAction("Получить технические требования", self)
-        get_req_action.setShortcut("Ctrl+Q")
-        get_req_action.triggered.connect(self.get_technical_requirements)
-        file_menu.addAction(get_req_action)
-
-        save_req_action = QAction("Сохранить документ требования", self)
-        save_req_action.setShortcut("Ctrl+S")
-        save_req_action.triggered.connect(self.save_technical_requirements)
-        file_menu.addAction(save_req_action)
-
-        apply_req_action = QAction("Применить технические требования", self)
-        apply_req_action.setShortcut("Ctrl+E")
-        apply_req_action.triggered.connect(lambda: self.apply_technical_requirements())
-        file_menu.addAction(apply_req_action)
-
-        # Добавляем действие для сохранения в PDF
-        save_pdf_action = QAction("Сохранить в PDF", self)
-        save_pdf_action.setShortcut("Ctrl+Shift+S")
-        save_pdf_action.triggered.connect(self.save_to_pdf)
-        file_menu.addAction(save_pdf_action)
+        self.check_connect_action = QAction("Проверить подключение", self)
+        self.check_connect_action.triggered.connect(self.check_kompas_connection)
+        file_menu.addAction(self.check_connect_action)
 
         file_menu.addSeparator()
 
-        disconnect_action = QAction("Отключиться от KOMPAS-3D", self)
-        disconnect_action.triggered.connect(self.disconnect_from_kompas)
-        file_menu.addAction(disconnect_action)
+        self.get_req_action = QAction("Получить технические требования", self)
+        self.get_req_action.triggered.connect(self.get_technical_requirements)
+        file_menu.addAction(self.get_req_action)
+
+        self.save_req_action = QAction("Сохранить документ требования", self)
+        self.save_req_action.triggered.connect(self.save_technical_requirements)
+        file_menu.addAction(self.save_req_action)
+
+        self.apply_req_action = QAction("Применить технические требования", self)
+        self.apply_req_action.triggered.connect(
+            lambda: self.apply_technical_requirements()
+        )
+        file_menu.addAction(self.apply_req_action)
+
+        file_menu.addSeparator()
+        self.settings_action = QAction("Настройки", self)
+        self.settings_action.triggered.connect(self.open_settings)
+        file_menu.addAction(self.settings_action)
+
+        self.save_pdf_action = QAction("Сохранить в PDF", self)
+        self.save_pdf_action.triggered.connect(self.save_to_pdf)
+        file_menu.addAction(self.save_pdf_action)
 
         file_menu.addSeparator()
 
-        exit_action = QAction("Выход", self)
-        exit_action.setShortcut("Alt+F4")
-        exit_action.triggered.connect(self.close)
-        file_menu.addAction(exit_action)
+        self.disconnect_action = QAction("Отключиться от KOMPAS-3D", self)
+        self.disconnect_action.triggered.connect(self.disconnect_from_kompas)
+        file_menu.addAction(self.disconnect_action)
 
-        # Меню "Инструменты" (без изменений)
+        file_menu.addSeparator()
+
+        self.exit_action = QAction("Выход", self)
+        self.exit_action.triggered.connect(self.close)
+        file_menu.addAction(self.exit_action)
+
+        # Меню "Инструменты"
         tools_menu = menu_bar.addMenu("Инструменты")
-        edit_templates_action = QAction("Редактировать файл шаблонов", self)
-        edit_templates_action.triggered.connect(self.edit_templates_file)
-        tools_menu.addAction(edit_templates_action)
+        self.edit_templates_action = QAction("Редактировать файл шаблонов", self)
+        self.edit_templates_action.triggered.connect(self.edit_templates_file)
+        tools_menu.addAction(self.edit_templates_action)
 
-        reload_templates_action = QAction("Обновить шаблоны", self)
-        reload_templates_action.setShortcut("F5")
-        reload_templates_action.triggered.connect(self.reload_templates)
-        tools_menu.addAction(reload_templates_action)
+        self.reload_templates_action = QAction("Обновить шаблоны", self)
+        self.reload_templates_action.triggered.connect(self.reload_templates)
+        tools_menu.addAction(self.reload_templates_action)
 
         tools_menu.addSeparator()
 
-        refresh_docs_action = QAction("Обновить список документов", self)
-        refresh_docs_action.setShortcut("F6")
-        refresh_docs_action.triggered.connect(self.update_documents_tree)
-        tools_menu.addAction(refresh_docs_action)
+        self.refresh_docs_action = QAction("Обновить список документов", self)
+        self.refresh_docs_action.triggered.connect(self.update_documents_tree)
+        tools_menu.addAction(self.refresh_docs_action)
 
-        theme_action = QAction("Переключить тему", self)
-        theme_action.setShortcut("Ctrl+T")
-        theme_action.triggered.connect(self.toggle_theme)
-        tools_menu.addAction(theme_action)
-
-        # Меню "Помощь" (без изменений)
+        # Меню "Помощь"
         help_menu = menu_bar.addMenu("Помощь")
-        about_action = QAction("О программе", self)
-        about_action.triggered.connect(self.show_about)
-        help_menu.addAction(about_action)
+        self.about_action = QAction("О программе", self)
+        self.about_action.triggered.connect(self.show_about)
+        help_menu.addAction(self.about_action)
 
-        shortcuts_action = QAction("Горячие клавиши", self)
-        shortcuts_action.triggered.connect(self.show_shortcuts)
-        help_menu.addAction(shortcuts_action)
+        self.shortcuts_action = QAction("Горячие клавиши", self)
+        self.shortcuts_action.triggered.connect(self.show_shortcuts)
+        help_menu.addAction(self.shortcuts_action)
+
+        # Применяем горячие клавиши после создания действий
+        self.apply_shortcuts()
 
     def create_toolbar(self):
         """Создание панели инструментов"""
@@ -543,7 +644,7 @@ class KompasApp(QMainWindow):
         self.docs_count_label = QLabel("Документов: 0")
         self.status_bar.addPermanentWidget(self.docs_count_label)
 
-        version_label = QLabel("v1.1.4 (2025)")
+        version_label = QLabel("v1.1.6 (2025)")
         self.status_bar.addPermanentWidget(version_label)
 
     def load_templates(self):
@@ -957,7 +1058,7 @@ class KompasApp(QMainWindow):
         doc_type = item.text(1)
         if self.activate_document_by_name(doc_name):
             if doc_type == "Чертеж":
-                QTimer.singleShot(500, self.get_technical_requirements)
+                QTimer.singleShot(100, self.get_technical_requirements)
                 self.status_bar.showMessage("Загрузка технических требований...")
 
     def activate_document_by_name(self, doc_name):
@@ -1150,6 +1251,9 @@ class KompasApp(QMainWindow):
                                 processed_lines.append((req_text, False))
                             else:
                                 processed_lines.append((line, True))
+                if len(processed_lines) == 1:
+                    # Для единственного пункта отключаем нумерацию
+                    processed_lines[0] = (processed_lines[0][0], False)
 
                 for line_text, is_numbered in processed_lines:
                     try:
@@ -2294,6 +2398,167 @@ class TemplateEditorDialog(QDialog):
             self.update_preview()
 
 
+class SettingsDialog(QDialog):
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.parent = parent
+        self.dark_mode = parent.dark_mode
+        self.shortcuts = parent.shortcuts.copy()  # Копия текущих горячих клавиш
+        self.setWindowTitle("Настройки")
+        self.setMinimumSize(500, 400)
+
+        # Инициализация интерфейса
+        self.init_ui()
+
+        # Применяем текущую тему
+        self.apply_theme()
+
+    def init_ui(self):
+        """Инициализация пользовательского интерфейса"""
+        layout = QVBoxLayout(self)
+
+        # Вкладки для настроек
+        tabs = QTabWidget()
+        layout.addWidget(tabs)
+
+        # Вкладка "Тема"
+        theme_tab = QWidget()
+        theme_layout = QVBoxLayout(theme_tab)
+        self.theme_group = QGroupBox("Тема интерфейса")
+        theme_inner_layout = QVBoxLayout()
+        self.theme_radio_light = QRadioButton("Светлая тема")
+        self.theme_radio_dark = QRadioButton("Темная тема")
+        if self.parent.dark_mode:
+            self.theme_radio_dark.setChecked(True)
+        else:
+            self.theme_radio_light.setChecked(True)
+        theme_inner_layout.addWidget(self.theme_radio_light)
+        theme_inner_layout.addWidget(self.theme_radio_dark)
+        self.theme_group.setLayout(theme_inner_layout)
+        theme_layout.addWidget(self.theme_group)
+        theme_layout.addStretch()
+        tabs.addTab(theme_tab, "Тема")
+
+        # Вкладка "Горячие клавиши"
+        shortcuts_tab = QWidget()
+        shortcuts_layout = QVBoxLayout(shortcuts_tab)
+        self.shortcuts_table = QTableWidget()
+        self.shortcuts_table.setColumnCount(2)
+        self.shortcuts_table.setHorizontalHeaderLabels(["Действие", "Горячая клавиша"])
+        self.shortcuts_table.horizontalHeader().setSectionResizeMode(
+            0, QHeaderView.ResizeMode.Stretch
+        )
+        self.shortcuts_table.horizontalHeader().setSectionResizeMode(
+            1, QHeaderView.ResizeMode.ResizeToContents
+        )
+        # Исправляем режим редактирования
+        self.shortcuts_table.setEditTriggers(
+            QAbstractItemView.EditTrigger.NoEditTriggers
+        )
+        self.shortcuts_table.cellDoubleClicked.connect(self.edit_shortcut)
+        self.populate_shortcuts_table()
+        shortcuts_layout.addWidget(self.shortcuts_table)
+        tabs.addTab(shortcuts_tab, "Горячие клавиши")
+
+        # Кнопки
+        btn_box = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
+        btn_box.accepted.connect(self.save_settings)
+        btn_box.rejected.connect(self.reject)
+        layout.addWidget(btn_box)
+
+    def populate_shortcuts_table(self):
+        """Заполнение таблицы горячих клавиш"""
+        self.shortcuts_table.setRowCount(len(self.shortcuts))
+        action_names = {
+            "connect_to_kompas": "Подключиться к KOMPAS-3D",
+            "check_connection": "Проверить подключение",
+            "get_requirements": "Получить тех. требования",
+            "save_requirements": "Сохранить тех. требования",
+            "apply_requirements": "Применить тех. требования",
+            "save_to_pdf": "Сохранить в PDF",
+            "open_settings": "Настройки",
+            "disconnect_from_kompas": "Отключиться от KOMPAS-3D",
+            "exit": "Выход",
+            "edit_templates": "Редактировать шаблоны",
+            "reload_templates": "Обновить шаблоны",
+            "refresh_docs": "Обновить список документов",
+            "about": "О программе",
+            "shortcuts": "Горячие клавиши",
+        }
+        for row, (key, value) in enumerate(self.shortcuts.items()):
+            self.shortcuts_table.setItem(
+                row, 0, QTableWidgetItem(action_names.get(key, key))
+            )
+            self.shortcuts_table.setItem(row, 1, QTableWidgetItem(value))
+
+    def edit_shortcut(self, row, column):
+        """Редактирование горячей клавиши"""
+        if column != 1:
+            return
+        action_key = list(self.shortcuts.keys())[row]
+        current_shortcut = self.shortcuts[action_key]
+        new_shortcut, ok = QInputDialog.getText(
+            self,
+            "Изменить горячую клавишу",
+            f"Введите новую горячую клавишу для '{self.shortcuts_table.item(row, 0).text()}':",
+            QLineEdit.EchoMode.Normal,  # Исправляем здесь
+            current_shortcut,
+        )
+        if ok:
+            # Проверка валидности горячей клавиши
+            if self.is_valid_shortcut(new_shortcut):
+                self.shortcuts[action_key] = new_shortcut
+                self.shortcuts_table.setItem(row, 1, QTableWidgetItem(new_shortcut))
+            else:
+                QMessageBox.warning(
+                    self,
+                    "Ошибка",
+                    "Недопустимая комбинация клавиш. Примеры: Ctrl+S, Alt+F4, F5",
+                )
+
+    def is_valid_shortcut(self, shortcut):
+        """Проверка валидности горячей клавиши"""
+        if not shortcut:
+            return True  # Пустая строка допустима (отключение горячей клавиши)
+        try:
+            from PyQt6.QtGui import QKeySequence
+
+            QKeySequence(shortcut)  # Проверяем, распознается ли комбинация
+            return True
+        except:
+            return False
+
+    def apply_theme(self):
+        """Применение темы для диалога"""
+        ThemeManager.apply_theme(self, self.parent.dark_mode)
+        self.theme_radio_light.setStyleSheet(
+            "QRadioButton { color: "
+            + ("#E6ECEF" if self.parent.dark_mode else "#303133")
+            + "; }"
+        )
+        self.theme_radio_dark.setStyleSheet(
+            "QRadioButton { color: "
+            + ("#E6ECEF" if self.parent.dark_mode else "#303133")
+            + "; }"
+        )
+
+    def save_settings(self):
+        """Сохранение настроек и применение изменений"""
+        new_dark_mode = self.theme_radio_dark.isChecked()
+        if new_dark_mode != self.parent.dark_mode:
+            self.parent.dark_mode = new_dark_mode
+            self.parent.apply_theme()
+            self.apply_theme()
+
+        # Применяем новые горячие клавиши
+        self.parent.shortcuts = self.shortcuts.copy()
+        self.parent.apply_shortcuts()
+        self.parent.save_settings()
+        self.accept()
+
+
 class ThemeManager:
     DARK_THEME = """
         QMainWindow, QDialog {
@@ -2494,6 +2759,7 @@ class ThemeManager:
             min-height: 30px;
             max-height: 30px;
         }
+
         QStatusBar::item {
             border: none;
         }
@@ -2503,6 +2769,7 @@ class ThemeManager:
         QWidget {
             font-size: 12px;
             letter-spacing: 0.5px;
+            color: #212529;
         }
         QGroupBox {
             font-size: 12px;
