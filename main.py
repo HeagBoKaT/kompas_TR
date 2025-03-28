@@ -543,7 +543,7 @@ class KompasApp(QMainWindow):
         self.docs_count_label = QLabel("Документов: 0")
         self.status_bar.addPermanentWidget(self.docs_count_label)
 
-        version_label = QLabel("v1.1.4 (2025)")
+        version_label = QLabel("v1.1.5 (2025)")
         self.status_bar.addPermanentWidget(version_label)
 
     def load_templates(self):
@@ -1150,6 +1150,9 @@ class KompasApp(QMainWindow):
                                 processed_lines.append((req_text, False))
                             else:
                                 processed_lines.append((line, True))
+                if len(processed_lines) == 1:
+                    # Для единственного пункта отключаем нумерацию
+                    processed_lines[0] = (processed_lines[0][0], False)
 
                 for line_text, is_numbered in processed_lines:
                     try:
