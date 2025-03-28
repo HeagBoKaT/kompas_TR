@@ -1,0 +1,94 @@
+{
+    "Общие": [
+        {
+            "text": "Общие допуски форм и расположения по ГОСТ 30893.2",
+            "variants": [
+                {
+                    "text": "-H.",
+                    "custom_input": false
+                },
+                {
+                    "text": "-К.",
+                    "custom_input": false
+                },
+                {
+                    "text": "-L.",
+                    "custom_input": false
+                },
+                {
+                    "text": "-{}.",
+                    "custom_input": true
+                }
+            ]
+        },
+        {
+            "text": "Неуказанные предельные отклонения размеров, получаемых гибкой - по ОСТ4 Г0.010.207, приложение 3, таблица 3.",
+            "variants": [
+                {
+                    "text": " Внутренний радиус сгибов {} мм.",
+                    "custom_input": true
+                },
+                {
+                    "text": " Внутренний радиус сгибов 1 мм.",
+                    "custom_input": false
+                },
+                {
+                    "text": " Внутренний радиус сгибов 0.5 мм.",
+                    "custom_input": false
+                },
+                {
+                    "text": " Внутренний радиус сгибов 2 мм.",
+                    "custom_input": false
+                }
+            ]
+        },
+        {
+            "text": "** Отверстия выполнять после сборки по ответной детали.",
+            "variants": []
+        },
+        {
+            "text": "Общие допуски по ГОСТ 30893.1:",
+            "variants": [
+                {
+                    "text": " H12, h12, ±IT12/2.",
+                    "custom_input": false
+                },
+                {
+                    "text": " H14, h14, ±IT14/2.",
+                    "custom_input": false
+                },
+                {
+                    "text": " H16, h16, ±IT16/2.",
+                    "custom_input": false
+                },
+                {
+                    "text": " H{}, h{}, ±IT{}/2.",
+                    "custom_input": true
+                }
+            ]
+        },
+        {
+            "text": "*Размер",
+            "variants": [
+                {
+                    "text": "ы для справок.",
+                    "custom_input": false
+                },
+                {
+                    "text": "для справок.",
+                    "custom_input": false
+                }
+            ]
+        },
+        {
+            "text": "Размеры для справок.",
+            "variants": []
+        }
+    ],
+    "Сварка": [
+        {
+            "text": "Сварные швы по ГОСТ 14771-76.",
+            "variants": []
+        }
+    ]
+}
