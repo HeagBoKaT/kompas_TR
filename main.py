@@ -46,7 +46,7 @@ from PyQt6.QtWidgets import (
     QAbstractItemView,
 )
 
-from PyQt6.QtGui import QIcon, QFont, QTextCharFormat, QTextCursor, QAction
+from PyQt6.QtGui import QIcon, QFont, QTextCharFormat, QTextCursor, QAction, QClipboard
 from PyQt6.QtCore import Qt, QTimer
 import pythoncom
 import win32com.client
@@ -55,23 +55,39 @@ import re
 import gc
 
 
+TT_CATEGORIES = [
+    "Требования к материалу, заготовке, термической обработке и свойствам",
+    "Требования к соединениям изделия",
+    "Размеры, предельные отклонения, геометрические допуски",
+    "Зазоры, расположение элементов конструкции",
+    "Требования к настройке и регулированию",
+    "Другие требования к качеству изделий",
+    "Условия и методы испытаний",
+    "Требования к качеству поверхностей, отделке, покрытию",
+    "Указания о маркировании и клеймении",
+    "Правила транспортирования и хранения",
+    "Особые условия эксплуатации",
+    "Принятые сокращения с расшифровкой",
+    "Ссылки на другие КД",
+    "Ссылки на другие документы с ТТ",
+]
+
+
 class KompasApp(QMainWindow):
     def __init__(self):
         super().__init__()
-        # Инициализация пути к файлу настроек
         user_home = os.path.expanduser("~")
         app_folder = os.path.join(user_home, "KOMPAS-TR")
         if not os.path.exists(app_folder):
             os.makedirs(app_folder)
         self.settings_file = os.path.join(app_folder, "settings.json")
 
-        # Инициализация status_bar до load_settings
         self.status_bar = self.statusBar()
         self.default_status_style = self.status_bar.styleSheet()
         self.status_bar.showMessage("Приложение запущено", 2000)
 
-        # Загружаем настройки (тема и горячие клавиши)
-        self.dark_mode, self.shortcuts = self.load_settings()
+        # Загружаем настройки (добавляем classification_rules)
+        self.dark_mode, self.shortcuts, self.classification_rules = self.load_settings()
 
         self.setWindowTitle("Редактор технических требований KOMPAS-3D")
         self.setGeometry(100, 100, 1400, 900)
@@ -115,70 +131,64 @@ class KompasApp(QMainWindow):
         # Определяем настройки по умолчанию
         default_shortcuts = {
             "connect_to_kompas": "Ctrl+K",
-            "check_connection": "",
             "get_requirements": "Ctrl+Q",
             "save_requirements": "Ctrl+S",
             "apply_requirements": "Ctrl+E",
             "save_to_pdf": "Ctrl+Shift+S",
             "open_settings": "Ctrl+I",
-            "disconnect_from_kompas": "",
             "exit": "Alt+F4",
-            "edit_templates": "",
             "reload_templates": "F5",
-            "refresh_docs": "F6",
-            "about": "",
-            "shortcuts": "",
         }
-        default_settings = {"dark_mode": False, "shortcuts": default_shortcuts}
+        default_classification_rules = {
+            cat: [] for cat in TT_CATEGORIES
+        }  # Пустые правила по умолчанию
+        default_settings = {
+            "dark_mode": False,
+            "shortcuts": default_shortcuts,
+            "classification_rules": default_classification_rules,
+        }
 
         try:
-            # Если файл настроек не существует, создаем его с настройками по умолчанию
             if not os.path.exists(self.settings_file):
                 with open(self.settings_file, "w", encoding="utf-8") as f:
                     json.dump(default_settings, f, ensure_ascii=False, indent=4)
-                return False, default_shortcuts
+                return False, default_shortcuts, default_classification_rules
 
-            # Загружаем существующий файл настроек
             with open(self.settings_file, "r", encoding="utf-8") as f:
                 settings = json.load(f)
 
-            # Проверяем, соответствует ли структура файла ожидаемой разметке
-            if (
-                not isinstance(settings, dict)
-                or "dark_mode" not in settings
-                or "shortcuts" not in settings
-            ):
-                # Если структура устарела (например, нет ключа "shortcuts"), перезаписываем файл
+            if not isinstance(settings, dict) or "dark_mode" not in settings:
                 self.status_bar.showMessage(
                     "Файл настроек устарел. Восстанавливаю настройки по умолчанию."
                 )
                 with open(self.settings_file, "w", encoding="utf-8") as f:
                     json.dump(default_settings, f, ensure_ascii=False, indent=4)
-                return False, default_shortcuts
+                return False, default_shortcuts, default_classification_rules
 
-            # Если структура корректна, загружаем настройки
             dark_mode = settings.get("dark_mode", False)
             shortcuts = settings.get("shortcuts", default_shortcuts)
+            classification_rules = settings.get(
+                "classification_rules", default_classification_rules
+            )
 
-            # Дополняем недостающие горячие клавиши значениями по умолчанию
+            # Дополняем недостающие горячие клавиши
             for key in default_shortcuts:
                 if key not in shortcuts:
                     shortcuts[key] = default_shortcuts[key]
-                    # Обновляем файл, если добавлены новые горячие клавиши
-                    settings["shortcuts"] = shortcuts
-                    with open(self.settings_file, "w", encoding="utf-8") as f:
-                        json.dump(settings, f, ensure_ascii=False, indent=4)
+            # Дополняем недостающие категории классификации
+            for cat in TT_CATEGORIES:
+                if cat not in classification_rules:
+                    classification_rules[cat] = []
 
-            return dark_mode, shortcuts
+            return dark_mode, shortcuts, classification_rules
 
         except Exception as e:
-            # В случае любой ошибки (например, файл поврежден) перезаписываем его
             self.status_bar.showMessage(
                 f"Ошибка загрузки настроек: {str(e)}. Восстанавливаю настройки по умолчанию."
             )
             with open(self.settings_file, "w", encoding="utf-8") as f:
                 json.dump(default_settings, f, ensure_ascii=False, indent=4)
-            return False, default_shortcuts
+            return False, default_shortcuts, default_classification_rules
 
     def apply_theme(self):
         ThemeManager.apply_theme(self, self.dark_mode)
@@ -202,9 +212,12 @@ class KompasApp(QMainWindow):
             return False
 
     def save_settings(self):
-        """Сохранение настроек в файл"""
         try:
-            settings = {"dark_mode": self.dark_mode, "shortcuts": self.shortcuts}
+            settings = {
+                "dark_mode": self.dark_mode,
+                "shortcuts": self.shortcuts,
+                "classification_rules": self.classification_rules,
+            }
             with open(self.settings_file, "w", encoding="utf-8") as f:
                 json.dump(settings, f, ensure_ascii=False, indent=4)
             self.status_bar.showMessage("Настройки сохранены")
@@ -214,19 +227,13 @@ class KompasApp(QMainWindow):
     def apply_shortcuts(self):
         """Применение горячих клавиш к действиям"""
         self.connect_action.setShortcut(self.shortcuts["connect_to_kompas"])
-        self.check_connect_action.setShortcut(self.shortcuts["check_connection"])
         self.get_req_action.setShortcut(self.shortcuts["get_requirements"])
         self.save_req_action.setShortcut(self.shortcuts["save_requirements"])
         self.apply_req_action.setShortcut(self.shortcuts["apply_requirements"])
         self.save_pdf_action.setShortcut(self.shortcuts["save_to_pdf"])
         self.settings_action.setShortcut(self.shortcuts["open_settings"])
-        self.disconnect_action.setShortcut(self.shortcuts["disconnect_from_kompas"])
         self.exit_action.setShortcut(self.shortcuts["exit"])
-        self.edit_templates_action.setShortcut(self.shortcuts["edit_templates"])
         self.reload_templates_action.setShortcut(self.shortcuts["reload_templates"])
-        self.refresh_docs_action.setShortcut(self.shortcuts["refresh_docs"])
-        self.about_action.setShortcut(self.shortcuts["about"])
-        self.shortcuts_action.setShortcut(self.shortcuts["shortcuts"])
 
     def save_theme_setting(self):
         """Сохранение настройки темы в файл"""
@@ -387,13 +394,25 @@ class KompasApp(QMainWindow):
         save_pdf_btn.triggered.connect(self.save_to_pdf)
         toolbar.addAction(save_pdf_btn)
 
-        # Новая кнопка для сохранения всех чертежей в PDF
+        # Кнопка сохранения всех чертежей в PDF
         save_all_pdf_btn = QAction("📚", self)
         save_all_pdf_btn.setToolTip("Сохранить все чертежи в PDF")
         save_all_pdf_btn.triggered.connect(self.save_all_drawings_to_pdf)
         toolbar.addAction(save_all_pdf_btn)
 
         toolbar.addSeparator()
+
+        # Кнопка проверки последовательности ТТ текущего документа
+        check_seq_btn = QAction("✅", self)
+        check_seq_btn.setToolTip("Проверить последовательность ТТ")
+        check_seq_btn.triggered.connect(self.check_tt_sequence)
+        toolbar.addAction(check_seq_btn)
+
+        # Новая кнопка проверки всех чертежей
+        check_all_btn = QAction("🛠️", self)
+        check_all_btn.setToolTip("Проверить все чертежи на правильность ТТ")
+        check_all_btn.triggered.connect(self.check_all_drawings_tt)
+        toolbar.addAction(check_all_btn)
 
         # Кнопка редактирования шаблонов
         edit_templates_btn = QAction("📝", self)
@@ -467,12 +486,13 @@ class KompasApp(QMainWindow):
         search_layout.addWidget(refresh_btn)
         left_layout.addLayout(search_layout)
 
-        # Дерево документов
+        # Дерево документов с новым столбцом "Статус"
         self.doc_tree = QTreeWidget()
-        self.doc_tree.setHeaderLabels(["Имя", "Тип", "Путь"])
-        self.doc_tree.setColumnWidth(0, 150)
-        self.doc_tree.setColumnWidth(1, 100)
-        self.doc_tree.setColumnWidth(2, 300)
+        self.doc_tree.setHeaderLabels(["Статус", "Имя", "Тип", "Путь"])
+        self.doc_tree.setColumnWidth(0, 50)  # Ширина столбца "Статус"
+        self.doc_tree.setColumnWidth(1, 150)
+        self.doc_tree.setColumnWidth(2, 100)
+        self.doc_tree.setColumnWidth(3, 300)
         self.doc_tree.itemDoubleClicked.connect(self.on_document_double_click)
         left_layout.addWidget(self.doc_tree)
         # Добавляем поддержку контекстного меню
@@ -490,8 +510,8 @@ class KompasApp(QMainWindow):
         if not item:
             return
 
-        doc_name = item.text(0)
-        doc_path = item.text(2)
+        doc_name = item.text(1)  # Имя теперь в столбце 1
+        doc_path = item.text(3)  # Путь теперь в столбце 3
 
         menu = QMenu(self)
 
@@ -644,7 +664,7 @@ class KompasApp(QMainWindow):
         self.docs_count_label = QLabel("Документов: 0")
         self.status_bar.addPermanentWidget(self.docs_count_label)
 
-        version_label = QLabel("v1.1.6 (2025)")
+        version_label = QLabel("v1.2.0 (2025)")
         self.status_bar.addPermanentWidget(version_label)
 
     def load_templates(self):
@@ -794,7 +814,7 @@ class KompasApp(QMainWindow):
                 if not hasattr(self, "app7") or not self.app7:
                     return False
 
-            doc_name = selected_items[0].text(0)
+            doc_name = selected_items[0].text(1)  # Имя теперь в столбце 1
             documents = self.app7.Documents
             for i in range(documents.Count):
                 doc = documents.Item(i)
@@ -818,9 +838,9 @@ class KompasApp(QMainWindow):
         selected_items = self.doc_tree.selectedItems()
         if selected_items:
             item = selected_items[0]
-            doc_name = item.text(0)
-            doc_type = item.text(1)
-            doc_path = item.text(2)
+            doc_name = item.text(1)  # Имя теперь в столбце 1
+            doc_type = item.text(2)  # Тип теперь в столбце 2
+            doc_path = item.text(3)  # Путь теперь в столбце 3
             info = f"Имя: {doc_name}\nТип: {doc_type}\nПуть: {doc_path}"
             QMessageBox.information(self, "Информация о документе", info)
 
@@ -1054,8 +1074,8 @@ class KompasApp(QMainWindow):
 
     def on_document_double_click(self, item, column):
         """Обработка двойного клика на документе в дереве"""
-        doc_name = item.text(0)
-        doc_type = item.text(1)
+        doc_name = item.text(1)  # Имя теперь в столбце 1
+        doc_type = item.text(2)  # Тип теперь в столбце 2
         if self.activate_document_by_name(doc_name):
             if doc_type == "Чертеж":
                 QTimer.singleShot(100, self.get_technical_requirements)
@@ -1309,14 +1329,14 @@ class KompasApp(QMainWindow):
             doc_name = document.Name
             for i in range(self.doc_tree.topLevelItemCount()):
                 item = self.doc_tree.topLevelItem(i)
-                if item.text(0) == doc_name:
+                if item.text(1) == doc_name:  # Имя теперь в столбце 1
                     self.doc_tree.setCurrentItem(item)
                     self.doc_tree.scrollToItem(item)
                     return
             self.update_documents_tree()
             for i in range(self.doc_tree.topLevelItemCount()):
                 item = self.doc_tree.topLevelItem(i)
-                if item.text(0) == doc_name:
+                if item.text(1) == doc_name:  # Имя теперь в столбце 1
                     self.doc_tree.setCurrentItem(item)
                     self.doc_tree.scrollToItem(item)
                     return
@@ -1324,7 +1344,7 @@ class KompasApp(QMainWindow):
             pass
 
     def update_documents_tree(self, search_term=None):
-        """Обновление дерева документов с учетом типов: чертежи, детали, сборки, спецификации и другие."""
+        """Обновление дерева документов с учетом поиска"""
         try:
             if not hasattr(self, "app7") or not self.app7:
                 self.status_bar.showMessage("Нет подключения к KOMPAS-3D")
@@ -1338,21 +1358,22 @@ class KompasApp(QMainWindow):
                 try:
                     doc = documents.Item(i)
                     if doc is None:
-                        continue  # Пропускаем, если документ не существует
+                        continue
                     doc_name = doc.Name
-                    if not doc_name:  # Дополнительная проверка на пустое имя
+                    if not doc_name:
                         continue
                     if search_term and search_term.lower() not in doc_name.lower():
                         continue
 
-                    # Определяем тип документа через DocumentType
                     doc_type = self.get_document_type(doc)
-
                     doc_path = doc.Path or "Документ не сохранен"
                     item = QTreeWidgetItem(self.doc_tree)
-                    item.setText(0, doc_name)
-                    item.setText(1, doc_type)
-                    item.setText(2, doc_path)
+
+                    # Устанавливаем индикатор по умолчанию (без проверки)
+                    item.setText(0, "⚪")  # Статус (индекс 0)
+                    item.setText(1, doc_name)  # Имя (индекс 1)
+                    item.setText(2, doc_type)  # Тип (индекс 2)
+                    item.setText(3, doc_path)  # Путь (индекс 3)
 
                     if (
                         self.app7.ActiveDocument
@@ -1373,9 +1394,6 @@ class KompasApp(QMainWindow):
         except Exception as e:
             self.status_bar.showMessage(
                 f"Ошибка при обновлении дерева документов: {str(e)}"
-            )
-            QMessageBox.critical(
-                self, "Ошибка", f"Не удалось обновить дерево документов: {str(e)}"
             )
 
     def get_document_type(self, doc):
@@ -2020,6 +2038,328 @@ class KompasApp(QMainWindow):
                 "Критическая ошибка при сохранении всех чертежей", False
             )
 
+    def analyze_technical_requirements(self):
+        text_content = self.current_reqs_text.toPlainText().strip()
+        if not text_content:
+            return []
+
+        lines = [line.strip() for line in text_content.split("\n") if line.strip()]
+        categorized_tt = []
+
+        for line in lines:
+            classified = False
+            for idx, category in enumerate(TT_CATEGORIES):
+                keywords = self.classification_rules.get(category, [])
+                if keywords and any(
+                    keyword.lower() in line.lower() for keyword in keywords
+                ):
+                    categorized_tt.append((line, idx))
+                    classified = True
+                    break
+            if not classified:
+                categorized_tt.append((line, 0))  # По умолчанию в первую категорию
+
+        return categorized_tt
+
+    def check_tt_sequence(self):
+        text_content = self.current_reqs_text.toPlainText().strip()
+        if not text_content:
+            self.set_status_message("Технические требования пусты", False)
+            return
+
+        lines = [line.strip() for line in text_content.split("\n") if line.strip()]
+        if not lines:
+            self.set_status_message("Технические требования пусты", False)
+            return
+
+        # Определяем категорию каждой строки
+        categorized_lines = []
+        for line in lines:
+            classified = False
+            for idx, category in enumerate(TT_CATEGORIES):
+                keywords = self.classification_rules.get(category, [])
+                if keywords and any(
+                    keyword.lower() in line.lower() for keyword in keywords
+                ):
+                    categorized_lines.append((line, idx))
+                    classified = True
+                    break
+            if not classified:
+                categorized_lines.append((line, 0))  # По умолчанию в первую категорию
+
+        # Проверяем последовательность категорий и наличие точки в конце пунктов
+        last_category_idx = -1
+        issues = []
+        for i, (line, category_idx) in enumerate(categorized_lines):
+            # Проверка последовательности категорий
+            if category_idx < last_category_idx:
+                issues.append(
+                    f"Строка {i+1}: '{line}' (категория '{TT_CATEGORIES[category_idx]}') "
+                    f"должна идти перед категорией '{TT_CATEGORIES[last_category_idx]}'"
+                )
+            last_category_idx = category_idx
+
+            # Проверка наличия точки в конце пункта
+            # Учитываем, что строка может быть подчиненной (начинается с отступа, тире или продолжающего текста)
+            clean_line = re.sub(r"^\d+\.\s*", "", line).strip()
+            is_subitem = (
+                clean_line.startswith("-")
+                or clean_line.startswith("–")
+                or (i > 0 and len(clean_line) > 0 and clean_line[0].islower())
+                or re.match(r"^\s+", line)
+            )
+            if not is_subitem and not clean_line.endswith("."):
+                issues.append(f"Строка {i+1}: '{line}' должна заканчиваться точкой")
+
+        if issues:
+            # Формируем правильную последовательность
+            sorted_lines = sorted(categorized_lines, key=lambda x: x[1])
+            correct_sequence = []
+            for line, _ in sorted_lines:
+                clean_line = re.sub(r"^\d+\.\s*", "", line).strip()
+                is_subitem = (
+                    clean_line.startswith("-")
+                    or clean_line.startswith("–")
+                    or (
+                        len(correct_sequence) > 0
+                        and len(clean_line) > 0
+                        and clean_line[0].islower()
+                    )
+                    or re.match(r"^\s+", line)
+                )
+                # Добавляем точку, если это не подчиненный пункт и точки нет
+                if not is_subitem and not clean_line.endswith("."):
+                    correct_line = f"{line}."
+                else:
+                    correct_line = line
+                correct_sequence.append(correct_line)
+
+            correct_text = "\n".join(correct_sequence)
+
+            # Создаем сообщение с правильной последовательностью
+            message = "Обнаружены нарушения последовательности ТТ или формата:\n\n"
+            message += "\n".join(issues)
+            message += "\n\nПравильная последовательность:\n"
+            message += correct_text
+
+            # Создаем диалоговое окно с кастомными кнопками
+            msg_box = QMessageBox(self)
+            msg_box.setWindowTitle("Проверка ТТ")
+            msg_box.setText(message)
+            msg_box.setIcon(QMessageBox.Icon.Warning)
+
+            # Добавляем кнопки
+            ok_button = QPushButton("ОК")
+            copy_button = QPushButton("Копировать")
+
+            msg_box.addButton(ok_button, QMessageBox.ButtonRole.AcceptRole)
+            msg_box.addButton(copy_button, QMessageBox.ButtonRole.ActionRole)
+
+            # Подключаем функциональность кнопок
+            ok_button.clicked.connect(msg_box.accept)
+            copy_button.clicked.connect(
+                lambda: self.copy_to_clipboard(correct_text, msg_box)
+            )
+
+            # Показываем окно
+            msg_box.exec()
+
+            self.set_status_message(
+                "Обнаружены нарушения последовательности или формата ТТ", False
+            )
+        else:
+            self.set_status_message("Последовательность и формат ТТ корректны", True)
+
+    def copy_to_clipboard(self, text, msg_box):
+        """Копирование текста в буфер обмена и закрытие окна"""
+        clipboard = QApplication.clipboard()
+        clipboard.setText(text)
+        self.status_bar.showMessage(
+            "Правильная последовательность скопирована в буфер обмена", 2000
+        )
+        msg_box.accept()
+
+    def check_all_drawings_tt(self):
+        """Проверка всех чертежей на правильность технических требований"""
+        try:
+            if not hasattr(self, "app7") or not self.app7:
+                self.connect_to_kompas()
+                if not hasattr(self, "app7") or not self.app7:
+                    self.set_status_message(
+                        "Не удалось подключиться к KOMPAS-3D", False
+                    )
+                    return
+
+            documents = self.app7.Documents
+            if documents.Count == 0:
+                self.set_status_message("Нет открытых документов", False)
+                return
+
+            original_active_doc = (
+                self.app7.ActiveDocument
+            )  # Сохраняем текущий активный документ
+            drawing_count = 0
+            issues_dict = {}  # Словарь для хранения проблем по документам
+
+            # Собираем все чертежи
+            for i in range(documents.Count):
+                doc = documents.Item(i)
+                if doc.DocumentType == 1:  # 1 - это тип чертежа
+                    drawing_count += 1
+                    doc.Active = True  # Активируем документ
+                    QTimer.singleShot(
+                        100, lambda: None
+                    )  # Небольшая задержка для активации
+
+                    # Получаем ТТ
+                    drawing_document = self.module7.IDrawingDocument(doc)
+                    tech_demand = drawing_document.TechnicalDemand
+                    if not tech_demand.IsCreated or tech_demand.Text.Count == 0:
+                        issues_dict[doc.Name] = [
+                            "Технические требования отсутствуют или пусты"
+                        ]
+                        continue
+
+                    text = tech_demand.Text
+                    formatted_text = self.parse_tech_req(text)
+                    self.current_reqs_text.setPlainText(
+                        formatted_text
+                    )  # Временная загрузка для проверки
+                    QTimer.singleShot(
+                        50, lambda: None
+                    )  # Небольшая задержка для обработки
+
+                    # Проверяем последовательность и формат
+                    lines = [
+                        line.strip()
+                        for line in formatted_text.split("\n")
+                        if line.strip()
+                    ]
+                    categorized_lines = self.analyze_technical_requirements()
+                    last_category_idx = -1
+                    issues = []
+
+                    for i, (line, category_idx) in enumerate(categorized_lines):
+                        # Проверка последовательности категорий
+                        if category_idx < last_category_idx:
+                            issues.append(
+                                f"Строка {i+1}: '{line}' (категория '{TT_CATEGORIES[category_idx]}') "
+                                f"должна идти перед категорией '{TT_CATEGORIES[last_category_idx]}'"
+                            )
+                        last_category_idx = category_idx
+
+                        # Проверка наличия точки в конце пункта
+                        clean_line = re.sub(r"^\d+\.\s*", "", line).strip()
+                        is_subitem = (
+                            clean_line.startswith("-")
+                            or clean_line.startswith("–")
+                            or (
+                                i > 0
+                                and len(clean_line) > 0
+                                and clean_line[0].islower()
+                            )
+                            or re.match(r"^\s+", line)
+                        )
+                        if not is_subitem and not clean_line.endswith("."):
+                            issues.append(
+                                f"Строка {i+1}: '{line}' должна заканчиваться точкой"
+                            )
+
+                    if issues:
+                        issues_dict[doc.Name] = issues
+
+            # Обновляем дерево с индикаторами
+            self.update_documents_tree_with_status(issues_dict)
+
+            # Восстанавливаем исходный активный документ
+            if original_active_doc:
+                original_active_doc.Active = True
+
+            if issues_dict:
+                # Формируем сообщение с результатами
+                message = "Результаты проверки ТТ:\n\n"
+                for doc_name, issues in issues_dict.items():
+                    message += f"Документ: {doc_name}\n"
+                    message += "\n".join(issues) + "\n\n"
+                QMessageBox.warning(self, "Проверка всех чертежей", message)
+                self.set_status_message(
+                    f"Найдены проблемы в {len(issues_dict)} чертежах", False
+                )
+            else:
+                self.set_status_message(f"Все {drawing_count} чертежей корректны", True)
+
+        except Exception as e:
+            error_message = self.handle_kompas_error(e, "проверки всех чертежей")
+            self.set_status_message("Ошибка при проверке всех чертежей", False)
+            QMessageBox.critical(self, "Ошибка", error_message)
+
+    def update_documents_tree_with_status(self, issues_dict=None):
+        """Обновление дерева документов с индикаторами статуса"""
+        try:
+            if not hasattr(self, "app7") or not self.app7:
+                self.status_bar.showMessage("Нет подключения к KOMPAS-3D")
+                return
+
+            self.doc_tree.clear()
+            documents = self.app7.Documents
+            doc_count = 0
+            issues_dict = issues_dict or {}
+
+            for i in range(documents.Count):
+                try:
+                    doc = documents.Item(i)
+                    if doc is None:
+                        continue
+                    doc_name = doc.Name
+                    if not doc_name:
+                        continue
+
+                    doc_type = self.get_document_type(doc)
+                    doc_path = doc.Path or "Документ не сохранен"
+                    item = QTreeWidgetItem(self.doc_tree)
+
+                    # Устанавливаем индикатор статуса
+                    if doc_type == "Чертеж":
+                        if doc_name in issues_dict:
+                            item.setText(
+                                0, "🟡"
+                            )  # Желтый индикатор для проблем (индекс 0)
+                            item.setToolTip(0, "\n".join(issues_dict[doc_name]))
+                        else:
+                            item.setText(
+                                0, "🟢"
+                            )  # Зеленый индикатор для корректных ТТ (индекс 0)
+                            item.setToolTip(0, "Технические требования корректны")
+                    else:
+                        item.setText(
+                            0, "⚪"
+                        )  # Белый индикатор для нечертежей (индекс 0)
+
+                    item.setText(1, doc_name)  # Имя (индекс 1)
+                    item.setText(2, doc_type)  # Тип (индекс 2)
+                    item.setText(3, doc_path)  # Путь (индекс 3)
+
+                    if (
+                        self.app7.ActiveDocument
+                        and self.app7.ActiveDocument.Name == doc_name
+                    ):
+                        self.doc_tree.setCurrentItem(item)
+                        self.doc_tree.scrollToItem(item)
+
+                    doc_count += 1
+                except Exception as e:
+                    self.status_bar.showMessage(
+                        f"Ошибка при обработке документа: {str(e)}"
+                    )
+                    continue
+
+            self.status_bar.showMessage(f"Найдено документов: {doc_count}")
+            self.docs_count_label.setText(f"Документов: {doc_count}")
+        except Exception as e:
+            self.status_bar.showMessage(
+                f"Ошибка при обновлении дерева документов: {str(e)}"
+            )
+
 
 class TemplateEditorDialog(QDialog):
     def __init__(self, parent, templates_file):
@@ -2403,25 +2743,24 @@ class SettingsDialog(QDialog):
         super().__init__(parent)
         self.parent = parent
         self.dark_mode = parent.dark_mode
-        self.shortcuts = parent.shortcuts.copy()  # Копия текущих горячих клавиш
+        self.shortcuts = parent.shortcuts.copy()
+        # Добавляем пользовательские правила классификации
+        self.classification_rules = (
+            parent.classification_rules.copy()
+            if hasattr(parent, "classification_rules")
+            else {cat: [] for cat in TT_CATEGORIES}
+        )
         self.setWindowTitle("Настройки")
         self.setMinimumSize(500, 400)
-
-        # Инициализация интерфейса
         self.init_ui()
-
-        # Применяем текущую тему
         self.apply_theme()
 
     def init_ui(self):
-        """Инициализация пользовательского интерфейса"""
         layout = QVBoxLayout(self)
-
-        # Вкладки для настроек
         tabs = QTabWidget()
         layout.addWidget(tabs)
 
-        # Вкладка "Тема"
+        # Вкладка "Тема" (существующая)
         theme_tab = QWidget()
         theme_layout = QVBoxLayout(theme_tab)
         self.theme_group = QGroupBox("Тема интерфейса")
@@ -2439,7 +2778,7 @@ class SettingsDialog(QDialog):
         theme_layout.addStretch()
         tabs.addTab(theme_tab, "Тема")
 
-        # Вкладка "Горячие клавиши"
+        # Вкладка "Горячие клавиши" (существующая)
         shortcuts_tab = QWidget()
         shortcuts_layout = QVBoxLayout(shortcuts_tab)
         self.shortcuts_table = QTableWidget()
@@ -2451,7 +2790,6 @@ class SettingsDialog(QDialog):
         self.shortcuts_table.horizontalHeader().setSectionResizeMode(
             1, QHeaderView.ResizeMode.ResizeToContents
         )
-        # Исправляем режим редактирования
         self.shortcuts_table.setEditTriggers(
             QAbstractItemView.EditTrigger.NoEditTriggers
         )
@@ -2459,6 +2797,30 @@ class SettingsDialog(QDialog):
         self.populate_shortcuts_table()
         shortcuts_layout.addWidget(self.shortcuts_table)
         tabs.addTab(shortcuts_tab, "Горячие клавиши")
+
+        # Новая вкладка "Классификация ТТ"
+        classification_tab = QWidget()
+        classification_layout = QVBoxLayout(classification_tab)
+        self.classification_table = QTableWidget()
+        self.classification_table.setColumnCount(2)
+        self.classification_table.setHorizontalHeaderLabels(
+            ["Категория", "Ключевые слова"]
+        )
+        self.classification_table.horizontalHeader().setSectionResizeMode(
+            0, QHeaderView.ResizeMode.Stretch
+        )
+        self.classification_table.horizontalHeader().setSectionResizeMode(
+            1, QHeaderView.ResizeMode.Stretch
+        )
+        self.classification_table.setEditTriggers(
+            QAbstractItemView.EditTrigger.NoEditTriggers
+        )
+        self.classification_table.cellDoubleClicked.connect(
+            self.edit_classification_rule
+        )
+        self.populate_classification_table()
+        classification_layout.addWidget(self.classification_table)
+        tabs.addTab(classification_tab, "Классификация ТТ")
 
         # Кнопки
         btn_box = QDialogButtonBox(
@@ -2468,24 +2830,46 @@ class SettingsDialog(QDialog):
         btn_box.rejected.connect(self.reject)
         layout.addWidget(btn_box)
 
+    def populate_classification_table(self):
+        self.classification_table.setRowCount(len(TT_CATEGORIES))
+        for row, (category, keywords) in enumerate(self.classification_rules.items()):
+            self.classification_table.setItem(row, 0, QTableWidgetItem(category))
+            self.classification_table.setItem(
+                row, 1, QTableWidgetItem(", ".join(keywords))
+            )
+
+    def edit_classification_rule(self, row, column):
+        if column != 1:
+            return
+        category = self.classification_table.item(row, 0).text()
+        current_keywords = self.classification_rules[category]
+        new_keywords, ok = QInputDialog.getText(
+            self,
+            "Изменить ключевые слова",
+            f"Введите ключевые слова для '{category}' (через запятую):",
+            QLineEdit.EchoMode.Normal,
+            ", ".join(current_keywords),
+        )
+        if ok and new_keywords:
+            self.classification_rules[category] = [
+                kw.strip() for kw in new_keywords.split(",") if kw.strip()
+            ]
+            self.classification_table.setItem(
+                row, 1, QTableWidgetItem(", ".join(self.classification_rules[category]))
+            )
+
     def populate_shortcuts_table(self):
         """Заполнение таблицы горячих клавиш"""
         self.shortcuts_table.setRowCount(len(self.shortcuts))
         action_names = {
             "connect_to_kompas": "Подключиться к KOMPAS-3D",
-            "check_connection": "Проверить подключение",
             "get_requirements": "Получить тех. требования",
             "save_requirements": "Сохранить тех. требования",
             "apply_requirements": "Применить тех. требования",
             "save_to_pdf": "Сохранить в PDF",
             "open_settings": "Настройки",
-            "disconnect_from_kompas": "Отключиться от KOMPAS-3D",
             "exit": "Выход",
-            "edit_templates": "Редактировать шаблоны",
             "reload_templates": "Обновить шаблоны",
-            "refresh_docs": "Обновить список документов",
-            "about": "О программе",
-            "shortcuts": "Горячие клавиши",
         }
         for row, (key, value) in enumerate(self.shortcuts.items()):
             self.shortcuts_table.setItem(
@@ -2545,15 +2929,16 @@ class SettingsDialog(QDialog):
         )
 
     def save_settings(self):
-        """Сохранение настроек и применение изменений"""
         new_dark_mode = self.theme_radio_dark.isChecked()
         if new_dark_mode != self.parent.dark_mode:
             self.parent.dark_mode = new_dark_mode
             self.parent.apply_theme()
             self.apply_theme()
 
-        # Применяем новые горячие клавиши
         self.parent.shortcuts = self.shortcuts.copy()
+        self.parent.classification_rules = (
+            self.classification_rules.copy()
+        )  # Сохраняем правила классификации
         self.parent.apply_shortcuts()
         self.parent.save_settings()
         self.accept()
