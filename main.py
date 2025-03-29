@@ -394,7 +394,7 @@ class KompasApp(QMainWindow):
         save_pdf_btn.triggered.connect(self.save_to_pdf)
         toolbar.addAction(save_pdf_btn)
 
-        # Новая кнопка для сохранения всех чертежей в PDF
+        # Кнопка сохранения всех чертежей в PDF
         save_all_pdf_btn = QAction("📚", self)
         save_all_pdf_btn.setToolTip("Сохранить все чертежи в PDF")
         save_all_pdf_btn.triggered.connect(self.save_all_drawings_to_pdf)
@@ -402,10 +402,17 @@ class KompasApp(QMainWindow):
 
         toolbar.addSeparator()
 
+        # Кнопка проверки последовательности ТТ текущего документа
         check_seq_btn = QAction("✅", self)
         check_seq_btn.setToolTip("Проверить последовательность ТТ")
         check_seq_btn.triggered.connect(self.check_tt_sequence)
         toolbar.addAction(check_seq_btn)
+
+        # Новая кнопка проверки всех чертежей
+        check_all_btn = QAction("🛠️", self)
+        check_all_btn.setToolTip("Проверить все чертежи на правильность ТТ")
+        check_all_btn.triggered.connect(self.check_all_drawings_tt)
+        toolbar.addAction(check_all_btn)
 
         # Кнопка редактирования шаблонов
         edit_templates_btn = QAction("📝", self)
@@ -479,12 +486,13 @@ class KompasApp(QMainWindow):
         search_layout.addWidget(refresh_btn)
         left_layout.addLayout(search_layout)
 
-        # Дерево документов
+        # Дерево документов с новым столбцом "Статус"
         self.doc_tree = QTreeWidget()
-        self.doc_tree.setHeaderLabels(["Имя", "Тип", "Путь"])
-        self.doc_tree.setColumnWidth(0, 150)
-        self.doc_tree.setColumnWidth(1, 100)
-        self.doc_tree.setColumnWidth(2, 300)
+        self.doc_tree.setHeaderLabels(["Статус", "Имя", "Тип", "Путь"])
+        self.doc_tree.setColumnWidth(0, 50)  # Ширина столбца "Статус"
+        self.doc_tree.setColumnWidth(1, 150)
+        self.doc_tree.setColumnWidth(2, 100)
+        self.doc_tree.setColumnWidth(3, 300)
         self.doc_tree.itemDoubleClicked.connect(self.on_document_double_click)
         left_layout.addWidget(self.doc_tree)
         # Добавляем поддержку контекстного меню
@@ -502,8 +510,8 @@ class KompasApp(QMainWindow):
         if not item:
             return
 
-        doc_name = item.text(0)
-        doc_path = item.text(2)
+        doc_name = item.text(1)  # Имя теперь в столбце 1
+        doc_path = item.text(3)  # Путь теперь в столбце 3
 
         menu = QMenu(self)
 
@@ -656,7 +664,7 @@ class KompasApp(QMainWindow):
         self.docs_count_label = QLabel("Документов: 0")
         self.status_bar.addPermanentWidget(self.docs_count_label)
 
-        version_label = QLabel("v1.1.7 (2025)")
+        version_label = QLabel("v1.2.0 (2025)")
         self.status_bar.addPermanentWidget(version_label)
 
     def load_templates(self):
@@ -806,7 +814,7 @@ class KompasApp(QMainWindow):
                 if not hasattr(self, "app7") or not self.app7:
                     return False
 
-            doc_name = selected_items[0].text(0)
+            doc_name = selected_items[0].text(1)  # Имя теперь в столбце 1
             documents = self.app7.Documents
             for i in range(documents.Count):
                 doc = documents.Item(i)
@@ -830,9 +838,9 @@ class KompasApp(QMainWindow):
         selected_items = self.doc_tree.selectedItems()
         if selected_items:
             item = selected_items[0]
-            doc_name = item.text(0)
-            doc_type = item.text(1)
-            doc_path = item.text(2)
+            doc_name = item.text(1)  # Имя теперь в столбце 1
+            doc_type = item.text(2)  # Тип теперь в столбце 2
+            doc_path = item.text(3)  # Путь теперь в столбце 3
             info = f"Имя: {doc_name}\nТип: {doc_type}\nПуть: {doc_path}"
             QMessageBox.information(self, "Информация о документе", info)
 
@@ -1066,8 +1074,8 @@ class KompasApp(QMainWindow):
 
     def on_document_double_click(self, item, column):
         """Обработка двойного клика на документе в дереве"""
-        doc_name = item.text(0)
-        doc_type = item.text(1)
+        doc_name = item.text(1)  # Имя теперь в столбце 1
+        doc_type = item.text(2)  # Тип теперь в столбце 2
         if self.activate_document_by_name(doc_name):
             if doc_type == "Чертеж":
                 QTimer.singleShot(100, self.get_technical_requirements)
@@ -1321,14 +1329,14 @@ class KompasApp(QMainWindow):
             doc_name = document.Name
             for i in range(self.doc_tree.topLevelItemCount()):
                 item = self.doc_tree.topLevelItem(i)
-                if item.text(0) == doc_name:
+                if item.text(1) == doc_name:  # Имя теперь в столбце 1
                     self.doc_tree.setCurrentItem(item)
                     self.doc_tree.scrollToItem(item)
                     return
             self.update_documents_tree()
             for i in range(self.doc_tree.topLevelItemCount()):
                 item = self.doc_tree.topLevelItem(i)
-                if item.text(0) == doc_name:
+                if item.text(1) == doc_name:  # Имя теперь в столбце 1
                     self.doc_tree.setCurrentItem(item)
                     self.doc_tree.scrollToItem(item)
                     return
@@ -1336,7 +1344,7 @@ class KompasApp(QMainWindow):
             pass
 
     def update_documents_tree(self, search_term=None):
-        """Обновление дерева документов с учетом типов: чертежи, детали, сборки, спецификации и другие."""
+        """Обновление дерева документов с учетом поиска"""
         try:
             if not hasattr(self, "app7") or not self.app7:
                 self.status_bar.showMessage("Нет подключения к KOMPAS-3D")
@@ -1350,21 +1358,22 @@ class KompasApp(QMainWindow):
                 try:
                     doc = documents.Item(i)
                     if doc is None:
-                        continue  # Пропускаем, если документ не существует
+                        continue
                     doc_name = doc.Name
-                    if not doc_name:  # Дополнительная проверка на пустое имя
+                    if not doc_name:
                         continue
                     if search_term and search_term.lower() not in doc_name.lower():
                         continue
 
-                    # Определяем тип документа через DocumentType
                     doc_type = self.get_document_type(doc)
-
                     doc_path = doc.Path or "Документ не сохранен"
                     item = QTreeWidgetItem(self.doc_tree)
-                    item.setText(0, doc_name)
-                    item.setText(1, doc_type)
-                    item.setText(2, doc_path)
+
+                    # Устанавливаем индикатор по умолчанию (без проверки)
+                    item.setText(0, "⚪")  # Статус (индекс 0)
+                    item.setText(1, doc_name)  # Имя (индекс 1)
+                    item.setText(2, doc_type)  # Тип (индекс 2)
+                    item.setText(3, doc_path)  # Путь (индекс 3)
 
                     if (
                         self.app7.ActiveDocument
@@ -1385,9 +1394,6 @@ class KompasApp(QMainWindow):
         except Exception as e:
             self.status_bar.showMessage(
                 f"Ошибка при обновлении дерева документов: {str(e)}"
-            )
-            QMessageBox.critical(
-                self, "Ошибка", f"Не удалось обновить дерево документов: {str(e)}"
             )
 
     def get_document_type(self, doc):
@@ -2081,10 +2087,11 @@ class KompasApp(QMainWindow):
             if not classified:
                 categorized_lines.append((line, 0))  # По умолчанию в первую категорию
 
-        # Проверяем последовательность категорий
+        # Проверяем последовательность категорий и наличие точки в конце пунктов
         last_category_idx = -1
         issues = []
         for i, (line, category_idx) in enumerate(categorized_lines):
+            # Проверка последовательности категорий
             if category_idx < last_category_idx:
                 issues.append(
                     f"Строка {i+1}: '{line}' (категория '{TT_CATEGORIES[category_idx]}') "
@@ -2092,16 +2099,48 @@ class KompasApp(QMainWindow):
                 )
             last_category_idx = category_idx
 
+            # Проверка наличия точки в конце пункта
+            # Учитываем, что строка может быть подчиненной (начинается с отступа, тире или продолжающего текста)
+            clean_line = re.sub(r"^\d+\.\s*", "", line).strip()
+            is_subitem = (
+                clean_line.startswith("-")
+                or clean_line.startswith("–")
+                or (i > 0 and len(clean_line) > 0 and clean_line[0].islower())
+                or re.match(r"^\s+", line)
+            )
+            if not is_subitem and not clean_line.endswith("."):
+                issues.append(f"Строка {i+1}: '{line}' должна заканчиваться точкой")
+
         if issues:
             # Формируем правильную последовательность
             sorted_lines = sorted(categorized_lines, key=lambda x: x[1])
-            correct_sequence = "\n".join([line for line, _ in sorted_lines])
+            correct_sequence = []
+            for line, _ in sorted_lines:
+                clean_line = re.sub(r"^\d+\.\s*", "", line).strip()
+                is_subitem = (
+                    clean_line.startswith("-")
+                    or clean_line.startswith("–")
+                    or (
+                        len(correct_sequence) > 0
+                        and len(clean_line) > 0
+                        and clean_line[0].islower()
+                    )
+                    or re.match(r"^\s+", line)
+                )
+                # Добавляем точку, если это не подчиненный пункт и точки нет
+                if not is_subitem and not clean_line.endswith("."):
+                    correct_line = f"{line}."
+                else:
+                    correct_line = line
+                correct_sequence.append(correct_line)
+
+            correct_text = "\n".join(correct_sequence)
 
             # Создаем сообщение с правильной последовательностью
-            message = "Обнаружены нарушения последовательности ТТ:\n\n"
+            message = "Обнаружены нарушения последовательности ТТ или формата:\n\n"
             message += "\n".join(issues)
             message += "\n\nПравильная последовательность:\n"
-            message += correct_sequence
+            message += correct_text
 
             # Создаем диалоговое окно с кастомными кнопками
             msg_box = QMessageBox(self)
@@ -2119,15 +2158,17 @@ class KompasApp(QMainWindow):
             # Подключаем функциональность кнопок
             ok_button.clicked.connect(msg_box.accept)
             copy_button.clicked.connect(
-                lambda: self.copy_to_clipboard(correct_sequence, msg_box)
+                lambda: self.copy_to_clipboard(correct_text, msg_box)
             )
 
             # Показываем окно
             msg_box.exec()
 
-            self.set_status_message("Обнаружены нарушения последовательности ТТ", False)
+            self.set_status_message(
+                "Обнаружены нарушения последовательности или формата ТТ", False
+            )
         else:
-            self.set_status_message("Последовательность ТТ корректна", True)
+            self.set_status_message("Последовательность и формат ТТ корректны", True)
 
     def copy_to_clipboard(self, text, msg_box):
         """Копирование текста в буфер обмена и закрытие окна"""
@@ -2137,6 +2178,187 @@ class KompasApp(QMainWindow):
             "Правильная последовательность скопирована в буфер обмена", 2000
         )
         msg_box.accept()
+
+    def check_all_drawings_tt(self):
+        """Проверка всех чертежей на правильность технических требований"""
+        try:
+            if not hasattr(self, "app7") or not self.app7:
+                self.connect_to_kompas()
+                if not hasattr(self, "app7") or not self.app7:
+                    self.set_status_message(
+                        "Не удалось подключиться к KOMPAS-3D", False
+                    )
+                    return
+
+            documents = self.app7.Documents
+            if documents.Count == 0:
+                self.set_status_message("Нет открытых документов", False)
+                return
+
+            original_active_doc = (
+                self.app7.ActiveDocument
+            )  # Сохраняем текущий активный документ
+            drawing_count = 0
+            issues_dict = {}  # Словарь для хранения проблем по документам
+
+            # Собираем все чертежи
+            for i in range(documents.Count):
+                doc = documents.Item(i)
+                if doc.DocumentType == 1:  # 1 - это тип чертежа
+                    drawing_count += 1
+                    doc.Active = True  # Активируем документ
+                    QTimer.singleShot(
+                        100, lambda: None
+                    )  # Небольшая задержка для активации
+
+                    # Получаем ТТ
+                    drawing_document = self.module7.IDrawingDocument(doc)
+                    tech_demand = drawing_document.TechnicalDemand
+                    if not tech_demand.IsCreated or tech_demand.Text.Count == 0:
+                        issues_dict[doc.Name] = [
+                            "Технические требования отсутствуют или пусты"
+                        ]
+                        continue
+
+                    text = tech_demand.Text
+                    formatted_text = self.parse_tech_req(text)
+                    self.current_reqs_text.setPlainText(
+                        formatted_text
+                    )  # Временная загрузка для проверки
+                    QTimer.singleShot(
+                        50, lambda: None
+                    )  # Небольшая задержка для обработки
+
+                    # Проверяем последовательность и формат
+                    lines = [
+                        line.strip()
+                        for line in formatted_text.split("\n")
+                        if line.strip()
+                    ]
+                    categorized_lines = self.analyze_technical_requirements()
+                    last_category_idx = -1
+                    issues = []
+
+                    for i, (line, category_idx) in enumerate(categorized_lines):
+                        # Проверка последовательности категорий
+                        if category_idx < last_category_idx:
+                            issues.append(
+                                f"Строка {i+1}: '{line}' (категория '{TT_CATEGORIES[category_idx]}') "
+                                f"должна идти перед категорией '{TT_CATEGORIES[last_category_idx]}'"
+                            )
+                        last_category_idx = category_idx
+
+                        # Проверка наличия точки в конце пункта
+                        clean_line = re.sub(r"^\d+\.\s*", "", line).strip()
+                        is_subitem = (
+                            clean_line.startswith("-")
+                            or clean_line.startswith("–")
+                            or (
+                                i > 0
+                                and len(clean_line) > 0
+                                and clean_line[0].islower()
+                            )
+                            or re.match(r"^\s+", line)
+                        )
+                        if not is_subitem and not clean_line.endswith("."):
+                            issues.append(
+                                f"Строка {i+1}: '{line}' должна заканчиваться точкой"
+                            )
+
+                    if issues:
+                        issues_dict[doc.Name] = issues
+
+            # Обновляем дерево с индикаторами
+            self.update_documents_tree_with_status(issues_dict)
+
+            # Восстанавливаем исходный активный документ
+            if original_active_doc:
+                original_active_doc.Active = True
+
+            if issues_dict:
+                # Формируем сообщение с результатами
+                message = "Результаты проверки ТТ:\n\n"
+                for doc_name, issues in issues_dict.items():
+                    message += f"Документ: {doc_name}\n"
+                    message += "\n".join(issues) + "\n\n"
+                QMessageBox.warning(self, "Проверка всех чертежей", message)
+                self.set_status_message(
+                    f"Найдены проблемы в {len(issues_dict)} чертежах", False
+                )
+            else:
+                self.set_status_message(f"Все {drawing_count} чертежей корректны", True)
+
+        except Exception as e:
+            error_message = self.handle_kompas_error(e, "проверки всех чертежей")
+            self.set_status_message("Ошибка при проверке всех чертежей", False)
+            QMessageBox.critical(self, "Ошибка", error_message)
+
+    def update_documents_tree_with_status(self, issues_dict=None):
+        """Обновление дерева документов с индикаторами статуса"""
+        try:
+            if not hasattr(self, "app7") or not self.app7:
+                self.status_bar.showMessage("Нет подключения к KOMPAS-3D")
+                return
+
+            self.doc_tree.clear()
+            documents = self.app7.Documents
+            doc_count = 0
+            issues_dict = issues_dict or {}
+
+            for i in range(documents.Count):
+                try:
+                    doc = documents.Item(i)
+                    if doc is None:
+                        continue
+                    doc_name = doc.Name
+                    if not doc_name:
+                        continue
+
+                    doc_type = self.get_document_type(doc)
+                    doc_path = doc.Path or "Документ не сохранен"
+                    item = QTreeWidgetItem(self.doc_tree)
+
+                    # Устанавливаем индикатор статуса
+                    if doc_type == "Чертеж":
+                        if doc_name in issues_dict:
+                            item.setText(
+                                0, "🟡"
+                            )  # Желтый индикатор для проблем (индекс 0)
+                            item.setToolTip(0, "\n".join(issues_dict[doc_name]))
+                        else:
+                            item.setText(
+                                0, "🟢"
+                            )  # Зеленый индикатор для корректных ТТ (индекс 0)
+                            item.setToolTip(0, "Технические требования корректны")
+                    else:
+                        item.setText(
+                            0, "⚪"
+                        )  # Белый индикатор для нечертежей (индекс 0)
+
+                    item.setText(1, doc_name)  # Имя (индекс 1)
+                    item.setText(2, doc_type)  # Тип (индекс 2)
+                    item.setText(3, doc_path)  # Путь (индекс 3)
+
+                    if (
+                        self.app7.ActiveDocument
+                        and self.app7.ActiveDocument.Name == doc_name
+                    ):
+                        self.doc_tree.setCurrentItem(item)
+                        self.doc_tree.scrollToItem(item)
+
+                    doc_count += 1
+                except Exception as e:
+                    self.status_bar.showMessage(
+                        f"Ошибка при обработке документа: {str(e)}"
+                    )
+                    continue
+
+            self.status_bar.showMessage(f"Найдено документов: {doc_count}")
+            self.docs_count_label.setText(f"Документов: {doc_count}")
+        except Exception as e:
+            self.status_bar.showMessage(
+                f"Ошибка при обновлении дерева документов: {str(e)}"
+            )
 
 
 class TemplateEditorDialog(QDialog):
